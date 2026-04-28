@@ -32,15 +32,21 @@ func main() {
 		os.Exit(1)
 	}
 
-	fridgeClient := fridge.NewHTTPClient(cfg.FridgeAPIBaseURL)
+	var fridgeClient fridge.Client
+	if cfg.FridgeAPIBaseURL == "" {
+		slog.Warn("fridge API not configured, using stub client")
+		fridgeClient = fridge.NewStubClient()
+	} else {
+		fridgeClient = fridge.NewHTTPClient(cfg.FridgeAPIBaseURL)
+	}
 	userStore := user.NewFileStore(cfg.UserPrefsFilePath)
 
 	var aiClient ai.Client
-	if cfg.Debug && cfg.AnthropicAPIKey == "" {
+	if cfg.Debug || cfg.OpenAIAPIKey == "" {
 		slog.Warn("DEBUG mode: using stub AI client")
 		aiClient = ai.NewStubClient()
 	} else {
-		aiClient = ai.NewAnthropicClient(cfg.AnthropicAPIKey, cfg.ClaudeModel, cfg.CacheEnabled)
+		aiClient = ai.NewOpenAIClient(cfg.OpenAIAPIKey, cfg.OpenAIModel, cfg.CacheEnabled)
 	}
 
 	recipeHandler := api.NewRecipeHandler(aiClient, fridgeClient, userStore)
@@ -51,7 +57,7 @@ func main() {
 		Addr:         ":" + cfg.Port,
 		Handler:      router,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 60 * time.Second,
+		WriteTimeout: 5 * time.Minute,
 		IdleTimeout:  120 * time.Second,
 	}
 

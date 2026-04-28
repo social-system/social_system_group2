@@ -5,37 +5,39 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 
-	"github.com/anthropics/anthropic-sdk-go"
-	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/responses"
 )
 
-// Client はAI（Claude）へのレシピ提案依頼インターフェース
+// Client はAIへのレシピ提案依頼インターフェース
 type Client interface {
 	SuggestRecipes(ctx context.Context, req SuggestRequest) ([]Recipe, error)
 }
 
-type anthropicClient struct {
-	client       *anthropic.Client
+type openaiClient struct {
+	client       *openai.Client
 	model        string
 	cache        *responseCache
 	cacheEnabled bool
 }
 
-// NewAnthropicClient はAnthropicAPIを使うClientを返す
-func NewAnthropicClient(apiKey, model string, cacheEnabled bool) Client {
-	c := anthropic.NewClient(option.WithAPIKey(apiKey))
-	return &anthropicClient{
-		client:       c,
+// NewOpenAIClient は OpenAI API を使う Client を返す
+func NewOpenAIClient(apiKey, model string, cacheEnabled bool) Client {
+	c := openai.NewClient(option.WithAPIKey(apiKey))
+	return &openaiClient{
+		client:       &c,
 		model:        model,
 		cache:        newResponseCache(10 * time.Minute),
 		cacheEnabled: cacheEnabled,
 	}
 }
 
-func (c *anthropicClient) SuggestRecipes(ctx context.Context, req SuggestRequest) ([]Recipe, error) {
+func (c *openaiClient) SuggestRecipes(ctx context.Context, req SuggestRequest) ([]Recipe, error) {
 	if err := validateSuggestRequest(req); err != nil {
 		return nil, err
 	}
@@ -58,33 +60,34 @@ func (c *anthropicClient) SuggestRecipes(ctx context.Context, req SuggestRequest
 	return recipes, nil
 }
 
-func (c *anthropicClient) callAPI(ctx context.Context, req SuggestRequest) ([]Recipe, error) {
+func (c *openaiClient) callAPI(ctx context.Context, req SuggestRequest) ([]Recipe, error) {
 	userMsg := BuildUserMessage(req)
 	sysPrompt := BuildSystemPrompt()
 
-	msg, err := c.client.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     anthropic.F(anthropic.Model(c.model)),
-		MaxTokens: anthropic.F(int64(4096)),
-		System: anthropic.F([]anthropic.TextBlockParam{
-			{
-				Type: anthropic.F(anthropic.TextBlockParamTypeText),
-				Text: anthropic.F(sysPrompt),
-				CacheControl: anthropic.F(anthropic.CacheControlEphemeralParam{
-					Type: anthropic.F(anthropic.CacheControlEphemeralTypeEphemeral),
-				}),
-			},
-		}),
-		Messages: anthropic.F([]anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(userMsg)),
-		}),
+	resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model:        openai.ResponsesModel(c.model),
+		Instructions: openai.String(sysPrompt),
+		Input:        responses.ResponseNewParamsInputUnion{OfString: openai.String(userMsg)},
+		Reasoning: openai.ReasoningParam{
+			Effort: openai.ReasoningEffortMedium,
+		},
+		Tools: []responses.ToolUnionParam{
+			responses.ToolParamOfWebSearchPreview(responses.WebSearchToolTypeWebSearchPreview),
+		},
 	})
 	if err != nil {
-		return nil, fmt.Errorf("anthropic API call failed: %w", err)
+		return nil, fmt.Errorf("openai API call failed: %w", err)
 	}
+	slog.Info("openai API call succeeded",
+		"model", resp.Model,
+		"input_tokens", resp.Usage.InputTokens,
+		"output_tokens", resp.Usage.OutputTokens,
+		"total_tokens", resp.Usage.TotalTokens,
+	)
 
-	rawText := extractTextContent(msg)
+	rawText := resp.OutputText()
 	if rawText == "" {
-		return nil, fmt.Errorf("anthropic API returned empty response")
+		return nil, fmt.Errorf("openai API returned empty response")
 	}
 
 	recipes, err := ParseRecipeSuggestions(rawText)
@@ -94,15 +97,6 @@ func (c *anthropicClient) callAPI(ctx context.Context, req SuggestRequest) ([]Re
 	return recipes, nil
 }
 
-func extractTextContent(msg *anthropic.Message) string {
-	for _, block := range msg.Content {
-		if block.Type == "text" {
-			return block.Text
-		}
-	}
-	return ""
-}
-
 func validateSuggestRequest(req SuggestRequest) error {
 	if len(req.AdditionalNotes) > 1000 {
 		return fmt.Errorf("additionalNotes exceeds maximum length of 1000 characters")
@@ -110,7 +104,7 @@ func validateSuggestRequest(req SuggestRequest) error {
 	return nil
 }
 
-// cacheKey はSuggestRequestの内容からキャッシュキーを生成する
+// cacheKey は SuggestRequest の内容からキャッシュキーを生成する
 func cacheKey(req SuggestRequest) string {
 	data, _ := json.Marshal(req)
 	sum := sha256.Sum256(data)

@@ -7,11 +7,11 @@ import (
 )
 
 type Config struct {
-	AnthropicAPIKey   string
+	OpenAIAPIKey      string
 	FridgeAPIBaseURL  string
 	UserPrefsFilePath string
 	Port              string
-	ClaudeModel       string
+	OpenAIModel       string
 	CacheEnabled      bool
 	Debug             bool
 }
@@ -26,15 +26,12 @@ func Load() (*Config, error) {
 		}
 	}
 
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" && !debug {
-		return nil, fmt.Errorf("ANTHROPIC_API_KEY is required")
+		return nil, fmt.Errorf("OPENAI_API_KEY is required")
 	}
 
 	fridgeURL := os.Getenv("FRIDGE_API_BASE_URL")
-	if fridgeURL == "" && !debug {
-		return nil, fmt.Errorf("FRIDGE_API_BASE_URL is required")
-	}
 
 	prefsPath := os.Getenv("USER_PREFS_FILE_PATH")
 	if prefsPath == "" {
@@ -46,9 +43,9 @@ func Load() (*Config, error) {
 		port = "8080"
 	}
 
-	model := os.Getenv("CLAUDE_MODEL")
+	model := os.Getenv("OPENAI_MODEL")
 	if model == "" {
-		model = "claude-opus-4-7"
+		model = "gpt-4o"
 	}
 
 	cacheEnabled := true
@@ -61,11 +58,11 @@ func Load() (*Config, error) {
 	}
 
 	return &Config{
-		AnthropicAPIKey:   apiKey,
+		OpenAIAPIKey:      apiKey,
 		FridgeAPIBaseURL:  fridgeURL,
 		UserPrefsFilePath: prefsPath,
 		Port:              port,
-		ClaudeModel:       model,
+		OpenAIModel:       model,
 		CacheEnabled:      cacheEnabled,
 		Debug:             debug,
 	}, nil

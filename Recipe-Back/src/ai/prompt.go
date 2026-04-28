@@ -11,26 +11,21 @@ const systemPrompt = `あなたは日本の家庭料理を専門とする料理A
 ユーザーの冷蔵庫の食材・常備調味料・個人の趣向をもとに、実在するレシピを提案します。
 
 【重要なルール】
-1. クックパッド・Delish Kitchen・MACARONI・みんなのきょうの料理・KURASHIRUなど、実在するレシピ共有サイトに掲載されているレシピのみを提案すること
-2. 必ず実際に存在するレシピの正確なURLを記載すること
-3. 常に3件のレシピを提案すること
-4. 冷蔵庫の食材をできるだけ多く活用するレシピを優先すること
-5. 個人の趣向・制限を厳守すること
-6. 回答はJSON形式のみ。他のテキストは一切含めないこと
-
-【対応レシピサイト例】
-- クックパッド: https://cookpad.com/recipe/XXXXXXX
-- Delish Kitchen: https://delishkitchen.tv/recipes/XXXXXXX
-- MACARONI: https://macaro-ni.jp/XXXXX
-- みんなのきょうの料理: https://www.kyounoryouri.jp/recipe/XXXXX
-- KURASHIRU: https://www.kurashiru.com/recipes/XXXXX
+0. 提案するレシピは独自に考案せず，必ず実在するレシピ共有サイトに掲載されているレシピを参照すること
+1. クックパッド・Delish Kitchen・KURASHIRUなどの実在するレシピ共有サイトに掲載されているレシピのみを提案すること
+2. クローラーの使用ができない場合は、APIやサイト内検索を駆使してレシピURLを特定する．それでも情報が得られないサイトは提案対象から除外する．
+3. 使用する材料の分量は一意に定まるように記載 
+4. 常に3件のレシピを提案すること
+5. 冷蔵庫の食材・賞味期限の近い食材をできるだけ多く活用するレシピを優先すること．
+6. 個人の趣向・制限を厳守すること
+7. 回答はJSON形式のみ。他のテキストは一切含めないこと
 
 【回答JSONスキーマ（厳守）】
 {
   "recipes": [
     {
       "name": "レシピ名",
-      "url": "実在するレシピURL（https://から始まる）",
+      "url": "参照したレシピURL（同一の料理であること）",
       "description": "1〜2文の説明",
       "matchScore": "高または中または低",
       "ingredients": [
@@ -97,6 +92,6 @@ func BuildUserMessage(req SuggestRequest) string {
 		sb.WriteString(req.AdditionalNotes + "\n")
 	}
 
-	sb.WriteString("\n---\n上記の条件に合う既存レシピを3つ提案してください。冷蔵庫の食材をできるだけ多く活用するレシピを優先してください。")
+	sb.WriteString("\n---\n上記の条件に合う既存レシピを3件提案してください。")
 	return sb.String()
 }

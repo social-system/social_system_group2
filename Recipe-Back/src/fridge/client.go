@@ -35,19 +35,20 @@ func (c *httpClient) GetInventory(ctx context.Context) (Inventory, error) {
 	url := c.baseURL + "/inventory"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return emptyInventory(), nil
+		slog.Warn("fridge request creation failed, using stub data", "error", err)
+		return stubInventory(), nil
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		slog.Warn("fridge system unavailable", "error", err)
-		return emptyInventory(), nil
+		slog.Warn("fridge system unavailable, using stub data", "error", err)
+		return stubInventory(), nil
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		slog.Warn("fridge system returned non-200", "status", resp.StatusCode)
-		return emptyInventory(), nil
+		slog.Warn("fridge system returned non-200, using stub data", "status", resp.StatusCode)
+		return stubInventory(), nil
 	}
 
 	var inventory Inventory
@@ -56,8 +57,4 @@ func (c *httpClient) GetInventory(ctx context.Context) (Inventory, error) {
 	}
 	inventory.FetchedAt = time.Now()
 	return inventory, nil
-}
-
-func emptyInventory() Inventory {
-	return Inventory{Items: []Item{}, FetchedAt: time.Now()}
 }

@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"unicode/utf8"
 
@@ -210,4 +211,11 @@ func writeError(w http.ResponseWriter, status int, code, message, details string
 		Code:    code,
 		Details: details,
 	})
+	// ログにもエラーを出力
+	slog.Error("API error",
+		"status", status,
+		"code", code,
+		"message", message,
+		"details", details,
+	)
 }
