@@ -14,8 +14,9 @@ cp .env.example .env
 
 | 変数名 | 説明 |
 |---|---|
-| `ANTHROPIC_API_KEY` | Anthropic APIキー（[console.anthropic.com](https://console.anthropic.com)から取得） |
+| `OPENAI_API_KEY` | OpenAI APIから取得 |
 | `FRIDGE_API_BASE_URL` | 冷蔵庫在庫管理システムのベースURL |
+| `DEBUG` | DEBUGモードのフラグ |
 
 任意の環境変数:
 
