@@ -76,20 +76,47 @@
 //}
 
 
-import Link from "next/link"; // Next.jsの移動用コンポーネント
+//import Link from "next/link"; // Next.jsの移動用コンポーネント
+//
+//export default function Home() {
+//  return (
+//    <main style={{ padding: "50px", textAlign: "center" }}>
+//      <h1>マイアプリ</h1>
+//      <p>下のボタンを押してカメラを起動してください。</p>
+//      
+//      {/* Linkコンポーネントで /camera に飛ばす */}
+//      <Link href="/camera">
+//        <button style={{ padding: "10px 20px", fontSize: "1.2rem", cursor: "pointer" }}>
+//          カメラを開く
+//        </button>
+//      </Link>
+//    </main>
+//  );
+//}
+
+import Link from "next/link";
 
 export default function Home() {
   return (
     <main style={{ padding: "50px", textAlign: "center" }}>
       <h1>マイアプリ</h1>
-      <p>下のボタンを押してカメラを起動してください。</p>
+      <p>機能を選択してください</p>
       
-      {/* Linkコンポーネントで /camera に飛ばす */}
-      <Link href="/camera">
-        <button style={{ padding: "10px 20px", fontSize: "1.2rem", cursor: "pointer" }}>
-          カメラを開く
-        </button>
-      </Link>
+      <div style={{ display: "flex", gap: "20px", justifyContent: "center", marginTop: "20px" }}>
+        {/* カメラページへ */}
+        <Link href="/camera">
+          <button style={{ padding: "20px", fontSize: "1.2rem", cursor: "pointer", backgroundColor: "#0070f3", color: "white", border: "none", borderRadius: "8px" }}>
+            📷 カメラを開く
+          </button>
+        </Link>
+
+        {/* 家計簿ページへ */}
+        <Link href="/kakeibo">
+          <button style={{ padding: "20px", fontSize: "1.2rem", cursor: "pointer", backgroundColor: "#ff4081", color: "white", border: "none", borderRadius: "8px" }}>
+            💰 家計簿をつける
+          </button>
+        </Link>
+      </div>
     </main>
   );
 }

@@ -130,7 +130,8 @@ export default function CameraPage() {
       formData.append("file", blob, "capture.jpg");
 
       // APIにPOST（※実際のAPI URLに書き換えてください）
-      const response = await fetch("https://your-api-endpoint.com/upload", {
+      //const response = await fetch("https://your-api-endpoint.com/upload", {
+      const response = await fetch("https://webhook.site/7f4126d9-cae0-4eb0-8647-3c3eaded2f37", {  
         method: "POST",
         body: formData,
       });
