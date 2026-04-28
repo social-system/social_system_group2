@@ -114,6 +114,8 @@ const videoConstraints = {
   facingMode: "user",
 };
 
+
+
 export default function CameraPage() {
   const [isCaptureEnable, setCaptureEnable] = useState<boolean>(false);
   const webcamRef = useRef<Webcam>(null);
@@ -133,7 +135,8 @@ export default function CameraPage() {
       //const response = await fetch("https://your-api-endpoint.com/upload", {
       //const response = await fetch("https://webhook.site/7f4126d9-cae0-4eb0-8647-3c3eaded2f37", { 
       // 修正後 (PythonサーバーのURL):
-      const response = await fetch("http://localhost:8000/upload", { 
+      //const response = await fetch("http://localhost:8000/upload", { 
+      const response = await fetch("http://localhost:8000/receipt/items", {   
         method: "POST",
         body: formData,
       });
