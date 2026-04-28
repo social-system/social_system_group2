@@ -6,7 +6,11 @@ import Link from "next/link";
 
 // あなたのAPIエンドポイントURLに書き換えてください
 //const API_URL = "https://your-api-endpoint.com/expenses";
-const API_URL = "https://webhook.site/7f4126d9-cae0-4eb0-8647-3c3eaded2f37";
+//const API_URL = "https://webhook.site/7f4126d9-cae0-4eb0-8647-3c3eaded2f37";
+
+// 修正後 (PythonサーバーのURL):
+const API_URL = "http://localhost:8000/kakeibo/add";
+const RECIPE_API_URL = "http://localhost:8080/api/v1/recipes/suggest";
 
 export default function KakeiboPage() {
   const [expenses, setExpenses] = useState<any[]>([]);
@@ -18,6 +22,8 @@ export default function KakeiboPage() {
   const [date, setDate] = useState("");
   const [ingredients, setIngredients] = useState("0"); // 0:いいえ、1:はい
   const [deleteId, setDeleteId] = useState("");
+// --- 追加：レシピ提案の結果を保存する ---
+  const [suggestedRecipe, setSuggestedRecipe] = useState<any>(null);
 
   // 1. データ読み込み (Read)
   useEffect(() => {
@@ -51,6 +57,18 @@ export default function KakeiboPage() {
     }
   };
 
+// --- 追加：curl -X POST ... と同じ動きをする関数 ---
+  const handleSuggestRecipe = async () => {
+    try {
+      const res = await axios.post(RECIPE_API_URL, {}); // -d '{}' と同じ
+      setSuggestedRecipe(res.data); // 結果を保存
+      alert("レシピを提案しました！");
+    } catch (err) {
+      console.error("レシピ提案失敗", err);
+      alert("レシピ提案に失敗しました。サーバーが8080ポートで動いているか確認してください。");
+    }
+  };
+
   // 3. データ削除 (Delete)
   const handleDeleteById = async (id?: string) => {
     const targetId = id || deleteId;
@@ -81,7 +99,22 @@ export default function KakeiboPage() {
         </select>
         <button onClick={handleAdd} style={{ backgroundColor: '#4CAF50', color: 'white', padding: '10px' }}>追加する</button>
       </div>
+{/* --- 追加：レシピ提案セクション --- */}
+      <hr style={{ margin: '20px 0' }} />
+      <h2>AIレシピ提案</h2>
+      <button 
+        onClick={handleSuggestRecipe} 
+        style={{ backgroundColor: '#ff9800', color: 'white', padding: '10px', borderRadius: '5px', border: 'none', cursor: 'pointer' }}
+      >
+        今日のレシピを提案してもらう
+      </button>
 
+      {suggestedRecipe && (
+        <div style={{ marginTop: '10px', padding: '10px', border: '1px solid #ccc', borderRadius: '5px' }}>
+          <h3>提案結果:</h3>
+          <pre>{JSON.stringify(suggestedRecipe, null, 2)}</pre>
+        </div>
+      )}
       <hr style={{ margin: '20px 0' }} />
 
       <h2>履歴一覧</h2>
