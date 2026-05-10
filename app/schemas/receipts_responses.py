@@ -23,3 +23,8 @@ class ReceiptSummaryResponse(BaseModel):
     item_count: int
     date_min: int
     date_max: int
+
+
+class ReceiptDeleteResponse(BaseModel):
+    deleted: bool
+    id: int

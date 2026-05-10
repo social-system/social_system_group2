@@ -3,10 +3,11 @@ from sqlalchemy.orm import Session
 
 from app.common.date import format_yyyymmdd
 from app.common.date import parse_yyyymmdd
-from app.crud.receipts import get_receipt, list_receipts
+from app.crud.receipts import delete_receipt, get_receipt, list_receipts
 from app.db.session import get_db
 from app.routes import receipts_create
 from app.schemas.receipts_responses import (
+    ReceiptDeleteResponse,
     ReceiptItemResponse,
     ReceiptResponse,
     ReceiptSummaryResponse,
@@ -53,6 +54,22 @@ def read_receipts(
             date_to=date_to,
         )
     ]
+
+
+@router.delete("/receipts/{receipt_id}", response_model=ReceiptDeleteResponse)
+def remove_receipt(
+    receipt_id: int,
+    db: Session = Depends(get_db),
+):
+    deleted_id = delete_receipt(db, receipt_id)
+    if deleted_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="receipt not found",
+        )
+
+    db.commit()
+    return ReceiptDeleteResponse(deleted=True, id=deleted_id)
 
 
 @router.get("/receipts/{receipt_id}", response_model=ReceiptResponse)
