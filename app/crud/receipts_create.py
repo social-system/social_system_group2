@@ -7,6 +7,13 @@ from app.schemas.receipts_requests import ReceiptCreate
 
 
 def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
+    for item in data.items:
+        if item.num * item.amount != item.total:
+            raise ValueError(
+                f"num * amountとtotalが一致しません: "
+                f"num={item.num}, amount={item.amount}, total={item.total}"
+            )
+
     # 明細itemごとの総額の合計
     items_total = sum(item.total for item in data.items)
 

@@ -1,4 +1,7 @@
 from pydantic import BaseModel, Field
+from pydantic import field_validator
+
+from app.common.date import parse_yyyymmdd
 
 
 class ReceiptItemCreate(BaseModel):
@@ -9,7 +12,13 @@ class ReceiptItemCreate(BaseModel):
     date: int
     ingredients: int
 
+    @field_validator("date")
+    @classmethod
+    def validate_date(cls, value: int) -> int:
+        parse_yyyymmdd(value)
+        return value
+
 
 class ReceiptCreate(BaseModel):
     receipt_total: int = Field(ge=0)  # 合計金額0以上
-    items: list[ReceiptItemCreate]  # 配列/min_lengthなし(空レシート許可)
+    items: list[ReceiptItemCreate] = Field(min_length=1)
