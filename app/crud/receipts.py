@@ -64,3 +64,14 @@ def list_receipts(
         )
         for row in db.execute(statement)
     ]
+
+
+def delete_receipt(db: Session, receipt_id: int) -> int | None:
+    receipt = get_receipt(db, receipt_id)
+    if receipt is None:
+        return None
+
+    deleted_id = receipt.id
+    db.delete(receipt)
+    db.flush()
+    return deleted_id
