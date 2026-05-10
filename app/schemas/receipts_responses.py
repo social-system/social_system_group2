@@ -15,3 +15,11 @@ class ReceiptResponse(BaseModel):
     id: int
     receipt_total: int
     items: list[ReceiptItemResponse]
+
+
+class ReceiptSummaryResponse(BaseModel):
+    id: int
+    receipt_total: int
+    item_count: int
+    date_min: int
+    date_max: int
