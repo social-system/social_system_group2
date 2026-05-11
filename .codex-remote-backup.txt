@@ -1,0 +1,2 @@
+origin	git@github.com:social-system/social_system_group2.git (fetch)
+origin	git@github.com:social-system/social_system_group2.git (push)
