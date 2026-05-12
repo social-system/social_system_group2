@@ -32,7 +32,7 @@ func NewHTTPClient(baseURL string) Client {
 // GetInventory は冷蔵庫システムから在庫を取得する。
 // システムが利用不可の場合はエラーにせず空のInventoryを返す（グレースフルデグラデーション）。
 func (c *httpClient) GetInventory(ctx context.Context) (Inventory, error) {
-	url := c.baseURL + "/inventory"
+	url := c.baseURL + "/inventory/batches"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		slog.Warn("fridge request creation failed, using stub data", "error", err)

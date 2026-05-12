@@ -16,7 +16,7 @@ const systemPrompt = `あなたは日本の家庭料理を専門とする料理A
 2. クローラーの使用ができない場合は、APIやサイト内検索を駆使してレシピURLを特定する．それでも情報が得られないサイトは提案対象から除外する．
 3. 使用する材料の分量は一意に定まるように記載 
 4. 常に3件のレシピを提案すること
-5. 冷蔵庫の食材・賞味期限の近い食材をできるだけ多く活用するレシピを優先すること
+5. 冷蔵庫の食材・賞味期限の近い食材をできるだけ多く活用するレシピを優先すること。賞味期限がなく購入日のみ記載された食材も購入日が古いものを優先的に活用すること
 6. 個人の趣向・制限を厳守すること
 7. 回答はJSON形式のみ。他のテキストは一切含めないこと
 8. 分量の単位は，野菜は個，肉・魚はグラム，調味料は大さじ・小さじなど一般的な表記を用いること
@@ -62,12 +62,12 @@ func BuildUserMessage(req SuggestRequest) string {
 		sb.WriteString("※冷蔵庫情報なし（未登録または取得失敗）\n")
 	} else {
 		for _, item := range req.FridgeItems {
-			unit := fridgeUnitStr(item.Ingredients)
-			dateStr := fridgeDateStr(item.Date)
-			if dateStr == "" {
-				fmt.Fprintf(&sb, "- %s: %d%s\n", item.Name, item.Num, unit)
+			if item.ExpiresAt != "" {
+				fmt.Fprintf(&sb, "- %s: %s%s（期限: %s）\n", item.ProductName, item.CurrentQuantity, item.Unit, item.ExpiresAt)
+			} else if item.PurchasedAt != "" {
+				fmt.Fprintf(&sb, "- %s: %s%s（購入日: %s）\n", item.ProductName, item.CurrentQuantity, item.Unit, item.PurchasedAt)
 			} else {
-				fmt.Fprintf(&sb, "- %s: %d%s（期限: %s）\n", item.Name, item.Num, unit, dateStr)
+				fmt.Fprintf(&sb, "- %s: %s%s\n", item.ProductName, item.CurrentQuantity, item.Unit)
 			}
 		}
 	}
@@ -99,20 +99,3 @@ func BuildUserMessage(req SuggestRequest) string {
 	return sb.String()
 }
 
-func fridgeUnitStr(ingredients int) string {
-	switch ingredients {
-	case 1:
-		return "個"
-	case 2:
-		return "g"
-	default:
-		return ""
-	}
-}
-
-func fridgeDateStr(d int) string {
-	if d == 0 {
-		return ""
-	}
-	return fmt.Sprintf("%04d-%02d-%02d", d/10000, (d%10000)/100, d%100)
-}
