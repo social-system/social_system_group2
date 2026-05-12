@@ -4,10 +4,12 @@ import "time"
 
 // Item は冷蔵庫の食材1品
 type Item struct {
-	Name       string    `json:"name"`
-	Amount     string    `json:"amount"`
-	ExpiryDate time.Time `json:"expiryDate"`
-	Category   string    `json:"category"` // 例: "野菜", "肉", "乳製品"
+	Name        string `json:"item"`
+	Num         int    `json:"num"`
+	Amount      int    `json:"amount"`
+	Total       int    `json:"total"`
+	Date        int    `json:"date"`        // yyyymmdd形式
+	Ingredients int    `json:"ingredients"` // 1=野菜, 2=肉/魚, 3=調味料
 }
 
 // Inventory は冷蔵庫の在庫全体

@@ -19,14 +19,14 @@ func (s *stubClient) GetInventory(_ context.Context) (Inventory, error) {
 func stubInventory() Inventory {
 	return Inventory{
 		Items: []Item{
-			{Name: "豚肉", Amount: "200g", ExpiryDate: time.Date(2026, 4, 22, 0, 0, 0, 0, time.Local), Category: "肉"},
-			{Name: "長ネギ", Amount: "100g", ExpiryDate: time.Date(2026, 6, 30, 0, 0, 0, 0, time.Local), Category: "野菜"},
-			{Name: "にんじん", Amount: "1本", ExpiryDate: time.Date(2026, 5, 30, 0, 0, 0, 0, time.Local), Category: "野菜"},
-			{Name: "ジャガイモ", Amount: "3個", ExpiryDate: time.Date(2026, 5, 30, 0, 0, 0, 0, time.Local), Category: "野菜"},
-			{Name: "バター", Amount: "120g", ExpiryDate: time.Date(2026, 4, 22, 0, 0, 0, 0, time.Local), Category: "乳製品"},
-			{Name: "牛乳", Amount: "300ml", ExpiryDate: time.Date(2026, 4, 25, 0, 0, 0, 0, time.Local), Category: "乳製品"},
-			{Name: "豆腐", Amount: "150g", ExpiryDate: time.Date(2026, 4, 25, 0, 0, 0, 0, time.Local), Category: "豆腐"},
-			{Name: "卵", Amount: "6個", ExpiryDate: time.Date(2026, 5, 5, 0, 0, 0, 0, time.Local), Category: "卵"},
+			{Name: "豚肉", Num: 1, Amount: 300, Total: 300, Date: 20260422, Ingredients: 2},
+			{Name: "長ネギ", Num: 2, Amount: 100, Total: 200, Date: 20260630, Ingredients: 1},
+			{Name: "にんじん", Num: 3, Amount: 80, Total: 240, Date: 20260530, Ingredients: 1},
+			{Name: "ジャガイモ", Num: 3, Amount: 120, Total: 360, Date: 20260530, Ingredients: 1},
+			{Name: "バター", Num: 1, Amount: 200, Total: 200, Date: 20260422, Ingredients: 3},
+			{Name: "牛乳", Num: 1, Amount: 150, Total: 150, Date: 20260425, Ingredients: 3},
+			{Name: "豆腐", Num: 2, Amount: 100, Total: 200, Date: 20260425, Ingredients: 1},
+			{Name: "卵", Num: 6, Amount: 30, Total: 180, Date: 20260505, Ingredients: 1},
 		},
 		FetchedAt: time.Now(),
 	}
