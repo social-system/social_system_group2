@@ -1,105 +1,88 @@
 # Milestone 00: Project Bootstrap
 
-## 目的
+## Goal
 
-OCR API を 1 から実装できる最小構成を作る。
+Create the minimum FastAPI project foundation.
 
-この段階では、Gemini や OpenAI への実接続は実装しなくてよい。まずは FastAPI アプリ、設定管理、テスト基盤、基本ディレクトリを整える。
+This milestone must not implement OCR, image upload, Gemini, OpenAI, database calls, or `.env` files.
 
-## 実装対象
+## Scope
 
-- FastAPI アプリ作成
-- `GET /health` 実装
-- `pydantic-settings` による設定管理
-- `.env.example` 作成
-- テスト基盤作成
-- README 初期化
+Implement:
 
-## 推奨ディレクトリ
+- `app/main.py`
+- `app/config.py`
+- package `__init__.py` files
+- empty module directories for schemas, services, providers, utils
+- `tests/test_health.py`
+- README update using `docs/README_TEMPLATE.md`
 
-```txt
-app/
-  __init__.py
-  main.py
-  config.py
-  logging_config.py
-  utils/
-    __init__.py
-    errors.py
-tests/
-  test_health.py
-README.md
-.env.example
-pyproject.toml
-```
+## Required API
 
-## 設定項目
+### GET /health
 
-`app/config.py` に settings を作る。
-
-必要な設定:
-
-```txt
-GEMINI_API_KEY
-GEMINI_MODEL
-OPENAI_API_KEY
-OPENAI_MODEL
-MAX_IMAGE_BYTES
-ALLOWED_IMAGE_MIME_TYPES
-APP_ENV
-LOG_LEVEL
-```
-
-テスト時に API キー未設定で落ちないようにする。実際に外部 API を呼ぶ時点で、必要なキーがなければ provider 側でエラーにする。
-
-## .env.example
-
-```env
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
-MAX_IMAGE_BYTES=10485760
-ALLOWED_IMAGE_MIME_TYPES=image/jpeg,image/png,image/webp
-APP_ENV=local
-LOG_LEVEL=INFO
-```
-
-## GET /health
-
-レスポンス:
+Response:
 
 ```json
 {
-  "status": "ok",
-  "service": "receipt-ocr-api"
+  "status": "ok"
 }
 ```
 
-外部 API 接続はしない。
+## Configuration rule
 
-## テスト
+Use `pydantic-settings` for configuration.
+Do not use `.env` files.
+Do not configure `env_file`.
 
-追加するテスト:
+The app must start without API keys.
 
-- `GET /health` が `200` を返す
-- レスポンスに `status = ok` が含まれる
+## Dependencies
 
-## 完了条件
+If missing, add runtime dependencies:
 
-次が成功すること。
+- `fastapi`
+- `uvicorn[standard]`
+- `pydantic`
+- `pydantic-settings`
+- `python-multipart`
+
+If missing, add dev dependencies:
+
+- `pytest`
+- `httpx`
+
+## Forbidden work
+
+Do not implement:
+
+- `POST /ocr/receipts/extract`
+- Image validation
+- Gemini provider
+- OpenAI provider
+- OCR service logic
+- Database registration
+- `.env`
+- `.env.example`
+
+## Required tests
+
+- `GET /health` returns 200
+- Response body is `{"status": "ok"}`
+
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-## 非対象
+## Completion report
 
-このマイルストーンでは次を実装しない。
+Report:
 
-- OCR 処理
-- Gemini provider
-- OpenAI provider
-- 画像アップロード
-- DB 登録
+- Changed files
+- Added API
+- Commands executed
+- Test results
+- Remaining TODOs

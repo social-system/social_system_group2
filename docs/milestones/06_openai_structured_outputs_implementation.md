@@ -1,70 +1,62 @@
 # Milestone 06: OpenAI Structured Outputs Implementation
 
-## 目的
+## Goal
 
-Gemini の中間出力を、OpenAI Structured Outputs で厳密な JSON に変換する provider を実装する。
+Implement the real OpenAI Structured Outputs provider behind the existing interface.
 
-## 実装対象
+Tests must mock the OpenAI client.
+Do not require live API keys.
 
-- `app/providers/openai_structured_provider.py` の実 API 呼び出し
-- JSON Schema 定義
-- Structured Outputs 用プロンプト
-- API キーとモデル名の settings 化
-- 失敗時の例外変換
-- provider テストは外部 API をモック
+## Scope
 
-## 入力
+Implement:
 
-```txt
-gemini_text: str
-```
+- Real OpenAI provider class
+- Strict JSON schema generation or inline schema
+- Configuration key check at provider execution time
+- Unit tests using mocks
 
-## 出力
+## Provider responsibility
 
-`OcrReceiptResponse` に変換可能な dict。
+The provider receives Gemini's intermediate extraction.
+It returns strict JSON matching `ReceiptOcrResponse`.
 
-## Schema 方針
+## Structured Outputs rules
 
-`docs/STRUCTURED_OUTPUT_SCHEMA.md` に定義された schema を使う。
+The schema must follow `docs/STRUCTURED_OUTPUT_SCHEMA.md`.
 
-必須条件:
+Required constraints:
 
-- `strict: true`
-- `additionalProperties: false`
-- 全フィールド required
-- 任意項目は `null` 許可
+- Strict structured output behavior
+- All fields required
+- Optional values represented with `null`
+- `additionalProperties: false` for every object
+- No unknown keys
 
-## OpenAI への指示方針
+## Missing API key rule
 
-```txt
-あなたは日本のレシートOCR結果をフロントエンド確認用JSONに整形する係です。
-不明な値は null にしてください。
-推測で埋めないでください。
-スキーマ外のキーを返さないでください。
-合計不一致や曖昧な箇所は warnings に入れてください。
-このJSONはDB登録用ではなく、ユーザー確認画面用です。
-```
+If `OPENAI_API_KEY` is missing during real provider execution, raise `ProviderConfigurationError`.
 
-## エラー処理
+Do not expose key values.
 
-OpenAI API 呼び出しで失敗した場合は、`OpenAIProviderError` を投げる。
+## Required tests
 
-OpenAI から返った出力が空、または dict として扱えない場合は、`StructuredOutputError` を投げる。
+Use OpenAI client mocks.
 
-## テスト
+- Provider sends schema-constrained request
+- Provider returns dict matching expected shape
+- Missing API key raises configuration error
+- SDK failure raises provider execution error
+- Invalid provider output raises invalid response error or validation error
 
-外部 API を直接呼ばない。
-
-追加するテスト:
-
-- OpenAI クライアント成功時に dict を返す
-- OpenAI クライアント失敗時に `OpenAIProviderError` を投げる
-- 空レスポンスで `StructuredOutputError` を投げる
-- schema の key が想定通りである
-
-## 完了条件
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
+
+## Manual verification
+
+If live verification is needed, provide commands for the human developer only.
+Do not run them.

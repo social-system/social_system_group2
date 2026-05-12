@@ -1,69 +1,77 @@
 # Milestone 07: Integration and Documentation
 
-## 目的
+## Goal
 
-OCR API 全体を統合し、README とテストを整備する。
+Finalize integration wiring, documentation, and manual verification instructions.
 
-## 実装対象
+Do not run live provider calls in Codex.
 
-- README.md 更新
-- curl 例の追加
-- `.env.example` の確認
-- エラー仕様の反映
-- 主要テストの追加または整理
-- `uv run python -m compileall app`
-- `uv run pytest`
+## Scope
 
-## README に書くこと
+Implement or update:
 
-- プロジェクト概要
-- DB 登録しないこと
-- フロントエンド確認用 API であること
-- 処理フロー
-- セットアップ方法
-- `.env.example` の説明
-- 起動方法
-- `GET /health` の例
-- `POST /ocr/receipts/extract` の curl 例
-- 正常レスポンス例
-- テスト実行方法
+- Provider dependency wiring
+- README
+- Error handling documentation alignment
+- Manual live verification section
+- Final integration tests with mocked providers
 
-## 統合テスト
+## Required behavior
 
-外部 API をモックした状態で、次を確認する。
+The app must:
 
-- 正常な画像アップロードで OCR レスポンスが返る
-- `warnings` を含む結果が返る
-- provider 失敗が適切な HTTP status になる
-- 不正画像系のエラーが適切に返る
+- Start without API keys
+- Pass tests without API keys
+- Use fake providers in tests
+- Return stable errors
+- Not create or read `.env` files
 
-## 最終確認コマンド
+## README requirements
+
+README must include:
+
+- Project overview
+- Explicit statement that DB registration is not performed
+- Setup command
+- Development server command
+- Health check example
+- Receipt extraction curl example
+- Test command
+- Environment variable policy
+- Human-only live provider verification instructions
+
+## Environment variable policy text
+
+Include this idea clearly:
+
+```text
+This project does not use .env files.
+For live manual testing, pass API keys through OS environment variables for the current shell or current command only.
+Do not commit API keys or store them in project files.
+```
+
+## Final tests
+
+- All tests pass
+- No test requires API keys
+- No test uses real provider calls
+- Compileall passes
+
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-## 完了報告に含めること
+## Completion report
 
-Codex の最後の報告には、次を含める。
+Report:
 
-```txt
-変更したファイル
-追加した API
-追加した schema
-追加した provider
-テスト結果
-未対応事項
-```
-
-## 非対象
-
-最後まで、次は実装しない。
-
-- DB 登録
-- database API 呼び出し
-- 在庫反映
-- レシピ提案
-- 認証
-- 画像保存
+- Changed files
+- Added APIs
+- Provider integration status
+- Commands executed
+- Test results
+- Manual verification steps
+- Remaining TODOs

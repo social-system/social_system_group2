@@ -1,163 +1,82 @@
 # Testing Strategy
 
-## 目的
+## Main rule
 
-このドキュメントは、OCR API のテスト方針を定義する。
+Tests must not require real API keys.
+Tests must not call real Gemini or OpenAI APIs.
+Tests must not require `.env` files.
 
-外部 API を実際に呼ばず、安定して実行できるテストを作る。
+All external providers must be mocked or faked.
 
-## 基本方針
+## Required test categories
 
-- pytest を使う。
-- FastAPI の TestClient または httpx AsyncClient を使う。
-- Gemini provider と OpenAI provider はモックする。
-- テストで実際の Gemini API / OpenAI API を呼ばない。
-- テスト用画像は小さなダミー画像を使う。
-- API キーがなくてもテストが通るようにする。
+### Health check
 
-## テスト対象
+- `GET /health` returns 200
+- Response is `{"status": "ok"}`
 
-```txt
-GET /health
-POST /ocr/receipts/extract
-image validation
-Pydantic schema validation
-ReceiptOcrService
-error handling
-```
+### Image validation
 
-## 必須テスト
+- JPEG is accepted
+- PNG is accepted
+- WebP is accepted
+- Unsupported MIME type returns 400
+- Empty file returns 400
+- Oversized file returns 413
 
-### 1. health check
+### OCR extraction endpoint
 
-`GET /health` が `200` を返す。
+- Valid image returns `status = needs_confirmation`
+- Provider calls are invoked through service/provider boundaries
+- Response contains top-level `warnings`
+- Response accepts `null` fields where allowed
 
-期待レスポンス例:
+### Provider failure
 
-```json
-{
-  "status": "ok",
-  "service": "receipt-ocr-api"
-}
-```
+- Gemini failure returns 502
+- OpenAI failure returns 502
+- Structured output validation failure returns 422 or 502 according to implementation choice
+- Missing provider key during real provider path returns controlled error
 
-### 2. 正常な画像アップロード
+### Business rules
 
-正常な画像をアップロードしたとき、`status = needs_confirmation` を返す。
+- Mismatched total and item sum returns warning, not failure
+- `confidence` must be between 0 and 1
+- Negative amount fails validation
+- Invalid date format fails validation
 
-外部 provider はモックする。
+## Fake providers
 
-確認項目:
+Use fake providers in tests.
+Do not monkeypatch environment variables with real secrets.
 
-- HTTP status が `200`
-- `status` が `needs_confirmation`
-- `items` が配列
-- `warnings` が配列
-
-### 3. 不正 MIME type
-
-`text/plain` などをアップロードすると `400` を返す。
-
-期待:
-
-```json
-{
-  "error": {
-    "code": "invalid_image_type"
-  }
-}
-```
-
-### 4. サイズ超過
-
-`MAX_IMAGE_BYTES` を超えるファイルで `413` を返す。
-
-### 5. Gemini provider 失敗
-
-Gemini provider が例外を投げる場合、API は `502` を返す。
-
-期待 code:
-
-```txt
-gemini_provider_failed
-```
-
-### 6. OpenAI provider 失敗
-
-OpenAI provider が例外を投げる場合、API は `502` を返す。
-
-期待 code:
-
-```txt
-openai_provider_failed
-```
-
-### 7. Structured Outputs 検証失敗
-
-OpenAI provider が Pydantic に合わない dict を返した場合、`422` または `502` を返す。
-
-このプロジェクトでは `422` を推奨する。
-
-期待 code:
-
-```txt
-structured_validation_failed
-```
-
-### 8. null を含むレスポンス
-
-次のような `null` を含むデータでも Pydantic 検証が通ることを確認する。
-
-```json
-{
-  "status": "needs_confirmation",
-  "store_name": null,
-  "purchased_at": null,
-  "total_amount": null,
-  "items": [],
-  "warnings": []
-}
-```
-
-### 9. 合計金額不一致
-
-`total_amount` と `items.line_total` の合計が一致しない場合、エラーではなく `warnings` を返す。
-
-### 10. base_quantity 不明
-
-単位変換が不明な商品について、`base_quantity = null` と `base_unit = null` を許容する。
-
-## テスト用 provider
-
-テストでは、次のような fake provider を使う。
+Example:
 
 ```python
 class FakeGeminiProvider:
-    async def extract_receipt_text(self, *, image_bytes: bytes, mime_type: str):
-        return GeminiExtractionResult(
-            text="店舗名: サンプルスーパー\n合計: 636円\nタマゴM 10コ 238円"
-        )
+    async def extract_receipt_text(self, *, image_bytes: bytes, mime_type: str) -> str:
+        return "fake receipt"
 
-class FakeOpenAIStructuredProvider:
-    async def structure_receipt(self, *, gemini_text: str):
+class FakeOpenAIProvider:
+    async def normalize_receipt(self, *, gemini_result: str) -> dict:
         return {
             "status": "needs_confirmation",
-            "store_name": "サンプルスーパー",
+            "store_name": "Test Store",
             "purchased_at": "2026-05-12",
-            "total_amount": 636,
+            "total_amount": 100,
             "items": [
                 {
-                    "raw_name": "タマゴM 10コ",
+                    "raw_name": "卵",
                     "normalized_name": "卵",
                     "category_name": "食費",
                     "purchased_quantity": 1,
                     "purchased_unit": "パック",
                     "base_quantity": 10,
                     "base_unit": "個",
-                    "unit_price": 238,
-                    "line_total": 238,
+                    "unit_price": 100,
+                    "line_total": 100,
                     "is_inventory_target": True,
-                    "confidence": 0.86,
+                    "confidence": 0.9,
                     "warnings": [],
                 }
             ],
@@ -165,41 +84,24 @@ class FakeOpenAIStructuredProvider:
         }
 ```
 
-## ダミー画像生成
+## Commands to run
 
-テスト用には、Pillow が使えるなら小さな画像を生成する。
-
-```python
-from io import BytesIO
-from PIL import Image
-
-def make_test_png() -> bytes:
-    image = Image.new("RGB", (10, 10), color="white")
-    buffer = BytesIO()
-    image.save(buffer, format="PNG")
-    return buffer.getvalue()
-```
-
-Pillow を依存に入れない方針なら、最小の PNG bytes を fixture として持つ。
-
-## 実行コマンド
+Every milestone must end with:
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-## CI で必要なこと
+If a milestone adds linting, also run:
 
-CI では外部 API キーなしでテストが通るようにする。
+```bash
+uv run ruff check .
+```
 
-そのため、settings 読み込み時に `GEMINI_API_KEY` や `OPENAI_API_KEY` が必須で落ちないようにするか、テスト時は dummy 値を設定する。
+## What not to test in Codex tasks
 
-## テストで避けること
-
-- 実際のレシート画像を使う
-- 外部 API に接続する
-- API キーを必要とする
-- 実行順序に依存する
-- ローカル環境の `.env` に依存する
-- 外部 API の応答文言に依存する
+Do not test actual Gemini image recognition.
+Do not test actual OpenAI Structured Outputs network calls.
+Do not test real receipt images containing personal information.
+Do not create or read `.env` files.

@@ -1,113 +1,66 @@
-# README Template
-
-このファイルは、最終的な `README.md` を作るときのテンプレートである。
-
-Codex は実装時に、リポジトリ直下の `README.md` をこの内容に沿って更新すること。
-
----
-
 # Receipt OCR API
 
-## 概要
+## Overview
 
-レシート画像を受け取り、Gemini で画像読解し、OpenAI Structured Outputs でフロントエンド確認用 JSON に整形する OCR API です。
+This project provides a Receipt OCR API.
 
-この API は DB 登録を行いません。OCR 結果はユーザー確認前の仮データとして返します。
+It receives a receipt image and returns structured candidate data for frontend confirmation.
 
-## 処理フロー
+It does not write to a database.
+It does not call the database API.
+It does not update inventory.
+It does not suggest recipes.
 
-```txt
-レシート画像
-  ↓
-Gemini で画像読解
-  ↓
-OpenAI Structured Outputs で JSON 厳密化
-  ↓
-Pydantic で検証
-  ↓
-フロントエンド確認画面へ返却
-```
-
-## セットアップ
+## Setup
 
 ```bash
 uv sync
-cp .env.example .env
 ```
 
-`.env` に API キーを設定します。
+## Run development server
 
-```env
-GEMINI_API_KEY=
-GEMINI_MODEL=gemini-2.5-flash
-OPENAI_API_KEY=
-OPENAI_MODEL=gpt-4.1-mini
-MAX_IMAGE_BYTES=10485760
-ALLOWED_IMAGE_MIME_TYPES=image/jpeg,image/png,image/webp
-APP_ENV=local
-LOG_LEVEL=INFO
-```
-
-## 起動
+Without live providers:
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-## API
-
-### GET /health
+With live providers, a human developer may pass environment variables for the current command only:
 
 ```bash
-curl http://localhost:8000/health
+OPENAI_API_KEY="..." GEMINI_API_KEY="..." uv run uvicorn app.main:app --reload
 ```
 
-### POST /ocr/receipts/extract
+Do not store API keys in project files.
+This project does not use `.env` files.
+
+## Health check
 
 ```bash
-curl -X POST "http://localhost:8000/ocr/receipts/extract" \
-  -F "file=@./samples/receipt.jpg"
+curl http://127.0.0.1:8000/health
 ```
 
-## レスポンス例
+Expected response:
 
 ```json
 {
-  "status": "needs_confirmation",
-  "store_name": "サンプルスーパー",
-  "purchased_at": "2026-05-12",
-  "total_amount": 636,
-  "items": [
-    {
-      "raw_name": "タマゴM 10コ",
-      "normalized_name": "卵",
-      "category_name": "食費",
-      "purchased_quantity": 1,
-      "purchased_unit": "パック",
-      "base_quantity": 10,
-      "base_unit": "個",
-      "unit_price": 238,
-      "line_total": 238,
-      "is_inventory_target": true,
-      "confidence": 0.86,
-      "warnings": []
-    }
-  ],
-  "warnings": []
+  "status": "ok"
 }
 ```
 
-## 注意
+## Extract receipt
 
-この API は OCR 結果を DB に登録しません。
+```bash
+curl -X POST "http://127.0.0.1:8000/ocr/receipts/extract" \
+  -F "file=@sample_receipt.jpg;type=image/jpeg"
+```
 
-フロントエンドでユーザーが確認・修正したあと、database API に登録する想定です。
-
-## テスト
+## Test
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-外部 API を直接呼ぶテストはありません。Gemini provider と OpenAI provider はモックします。
+Tests do not call real Gemini or OpenAI APIs.
+Tests do not require API keys.

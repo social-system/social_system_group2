@@ -1,98 +1,78 @@
 # Milestone 02: Provider Interfaces
 
-## 目的
+## Goal
 
-Gemini provider と OpenAI Structured Outputs provider のインターフェースを定義する。
+Create provider interfaces and fake-testable provider boundaries.
 
-この段階では、実 API 呼び出しは最小実装または未実装でもよい。重要なのは、service から provider を差し替えられる設計にすることである。
+Do not implement real Gemini or OpenAI network calls in this milestone.
 
-## 実装対象
+## Scope
 
+Implement:
+
+- Provider protocol or base classes
+- Provider-specific exceptions
+- Fake provider support for tests
+- Basic service dependency wiring if useful
+
+Suggested files:
+
+- `app/providers/base.py`
+- `app/providers/errors.py`
 - `app/providers/gemini_provider.py`
 - `app/providers/openai_structured_provider.py`
-- provider 用例外
-- fake provider を使った service テストの土台
 
-## GeminiProvider
+## Provider interfaces
 
-インターフェース例:
+Gemini provider suggested method:
 
 ```python
-from dataclasses import dataclass
-
-@dataclass(frozen=True)
-class GeminiExtractionResult:
-    text: str
-
-class GeminiProvider:
-    async def extract_receipt_text(
-        self,
-        *,
-        image_bytes: bytes,
-        mime_type: str,
-    ) -> GeminiExtractionResult:
-        ...
+async def extract_receipt_text(*, image_bytes: bytes, mime_type: str) -> str:
+    ...
 ```
 
-## OpenAIStructuredProvider
-
-インターフェース例:
+OpenAI provider suggested method:
 
 ```python
-class OpenAIStructuredProvider:
-    async def structure_receipt(
-        self,
-        *,
-        gemini_text: str,
-    ) -> dict:
-        ...
+async def normalize_receipt(*, gemini_result: str) -> dict:
+    ...
 ```
 
-## 例外
+## Required behavior
 
-次の例外を定義する。
+Providers must be replaceable in tests.
+Actual provider classes may raise `NotImplementedError` until later milestones.
 
-```python
-class ExternalProviderError(Exception):
-    pass
+Define clear exception types such as:
 
-class GeminiProviderError(ExternalProviderError):
-    pass
+- `ProviderConfigurationError`
+- `ProviderExecutionError`
+- `ProviderInvalidResponseError`
 
-class OpenAIProviderError(ExternalProviderError):
-    pass
+## Secret rules
 
-class StructuredOutputError(Exception):
-    pass
-```
+Do not read, print, or inspect actual environment variable values in tests.
+Do not require API keys for app startup or tests.
 
-## 実装ルール
+## Forbidden work
 
-- provider は API キーを settings から受け取る。
-- provider の import 時に外部 API 接続をしない。
-- provider は FastAPI の `HTTPException` を投げない。
-- provider の失敗は app 内例外として投げる。
-- テストで fake provider に差し替えられるようにする。
+Do not implement:
 
-## テスト
+- Live Gemini API call
+- Live OpenAI API call
+- `.env` files
+- Database calls
 
-このマイルストーンでは、外部 API 実接続テストは不要。
+## Required tests
 
-追加するテスト:
+- Fake Gemini provider can return fake OCR text
+- Fake OpenAI provider can return fake structured dict
+- Provider exceptions can be imported and handled
+- No test requires API keys
 
-- fake Gemini provider が期待値を返す
-- fake OpenAI provider が期待 dict を返す
-- provider の例外を service で扱える準備がある
-
-## 完了条件
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
-
-## 非対象
-
-- 本物の Gemini API 呼び出し
-- 本物の OpenAI API 呼び出し
-- route の完成

@@ -1,96 +1,55 @@
 # API Specification
 
-## 基本方針
+## Base purpose
 
-この API は、レシート OCR の仮データを返すための API である。
+The API returns candidate receipt data for frontend confirmation.
+All returned data is provisional.
 
-DB 登録は行わない。返却するデータは、フロントエンドでユーザーが確認・修正するための候補データである。
+## Endpoints
 
-## Base URL
+### GET /health
 
-ローカル開発時の例:
+Health check endpoint.
 
-```txt
-http://localhost:8000
-```
-
-## エンドポイント一覧
-
-```txt
-GET  /health
-POST /ocr/receipts/extract
-```
-
-## GET /health
-
-### 目的
-
-アプリケーションが起動しているか確認する。
-
-### 外部 API 接続
-
-この API では Gemini や OpenAI には接続しない。
-
-### レスポンス
+#### Response 200
 
 ```json
 {
-  "status": "ok",
-  "service": "receipt-ocr-api"
+  "status": "ok"
 }
 ```
 
-### ステータスコード
+---
 
-```txt
-200 OK
-```
+### POST /ocr/receipts/extract
 
-## POST /ocr/receipts/extract
+Extract candidate receipt data from one uploaded receipt image.
 
-### 目的
+The endpoint must accept `multipart/form-data`.
 
-レシート画像を受け取り、フロントエンド確認用の仮レシートデータを返す。
+#### Request
 
-### Request
-
-`multipart/form-data` で画像ファイルを送信する。
-
-| field | type | required | description |
+| Field | Type | Required | Description |
 |---|---|---:|---|
-| file | file | yes | レシート画像 |
+| `file` | file | yes | Receipt image |
 
-### 対応 MIME type
+Allowed MIME types:
 
-```txt
+```text
 image/jpeg
 image/png
 image/webp
 ```
 
-### サイズ制限
+Maximum file size is controlled by `MAX_IMAGE_BYTES`.
+Default is `10485760` bytes.
 
-環境変数 `MAX_IMAGE_BYTES` で指定する。
-
-初期値は 10MB を想定する。
-
-```env
-MAX_IMAGE_BYTES=10485760
-```
-
-### curl 例
-
-```bash
-curl -X POST "http://localhost:8000/ocr/receipts/extract" \
-  -F "file=@./samples/receipt.jpg"
-```
-
-### 正常レスポンス
+#### Response 200
 
 ```json
 {
   "status": "needs_confirmation",
-  "store_name": "サンプルスーパー",
+  "store_name": "Sample Store",
   "purchased_at": "2026-05-12",
   "total_amount": 1280,
   "items": [
@@ -109,99 +68,75 @@ curl -X POST "http://localhost:8000/ocr/receipts/extract" \
       "warnings": []
     }
   ],
-  "warnings": []
-}
-```
-
-## レスポンスフィールド
-
-### Receipt
-
-| field | type | required | nullable | description |
-|---|---|---:|---:|---|
-| status | string | yes | no | 常に `needs_confirmation` |
-| store_name | string | yes | yes | 店舗名 |
-| purchased_at | string | yes | yes | 購入日。`YYYY-MM-DD` |
-| total_amount | integer | yes | yes | レシートの最終支払額 |
-| items | array | yes | no | 明細候補 |
-| warnings | array[string] | yes | no | レシート全体の警告 |
-
-### Item
-
-| field | type | required | nullable | description |
-|---|---|---:|---:|---|
-| raw_name | string | yes | yes | レシート上の商品名に近い文字列 |
-| normalized_name | string | yes | yes | 正規化された商品名候補 |
-| category_name | string | yes | yes | 家計簿カテゴリ名候補 |
-| purchased_quantity | number | yes | yes | 購入時数量 |
-| purchased_unit | string | yes | yes | 購入時単位 |
-| base_quantity | number | yes | yes | 基準単位に変換した数量候補 |
-| base_unit | string | yes | yes | 基準単位 |
-| unit_price | integer | yes | yes | 単価 |
-| line_total | integer | yes | yes | 明細金額 |
-| is_inventory_target | boolean | yes | yes | 在庫対象候補 |
-| confidence | number | yes | yes | 読み取り信頼度。0以上1以下 |
-| warnings | array[string] | yes | no | 明細ごとの警告 |
-
-## status
-
-現時点では、正常レスポンスの `status` は常に次とする。
-
-```txt
-needs_confirmation
-```
-
-将来、OCR結果の品質に応じて `failed` や `partial` を増やす可能性はあるが、MVPでは増やさない。
-
-## エラーレスポンス
-
-エラー時は、次の形式を基本とする。
-
-```json
-{
-  "error": {
-    "code": "invalid_image_type",
-    "message": "Unsupported image MIME type.",
-    "details": null
-  }
-}
-```
-
-### エラー形式
-
-| field | type | description |
-|---|---|---|
-| error.code | string | アプリ内で安定して扱うエラーコード |
-| error.message | string | 利用者向けの短い説明 |
-| error.details | object/null | 必要な補足。秘密情報は含めない |
-
-## ステータスコード
-
-| status | case |
-|---:|---|
-| 200 | OCR成功。ユーザー確認用データを返す |
-| 400 | MIME type が不正 |
-| 413 | ファイルサイズ超過 |
-| 422 | 画像として読み取れない、または構造検証に失敗 |
-| 502 | Gemini または OpenAI の外部 API 失敗 |
-| 500 | 想定外の内部エラー |
-
-## 注意点
-
-合計金額と明細合計が一致しない場合は、原則として `200` を返す。
-
-その場合は、次のように `warnings` に入れる。
-
-```json
-{
   "warnings": [
-    "明細合計とレシート合計が一致していません。割引・税・読み取り漏れを確認してください。"
+    "合計金額と明細合計が一致しない可能性があります"
   ]
 }
 ```
 
-## DB 連携しない理由
+#### Response fields
 
-OCR は不確実な処理である。OCR 結果をそのまま DB に登録すると、家計簿、在庫、レシピ提案のすべてに誤データが広がる。
+| Field | Type | Required | Description |
+|---|---|---:|---|
+| `status` | string | yes | Always `needs_confirmation` on success |
+| `store_name` | string or null | yes | Store name candidate |
+| `purchased_at` | string or null | yes | Purchase date in `YYYY-MM-DD` |
+| `total_amount` | integer or null | yes | Final receipt total amount |
+| `items` | array | yes | Candidate item rows |
+| `warnings` | array of string | yes | Non-fatal warnings |
 
-そのため、この API は DB 登録をせず、フロントエンドの確認画面に仮データを返すだけにする。
+#### Item fields
+
+| Field | Type | Required | Description |
+|---|---|---:|---|
+| `raw_name` | string or null | yes | Name as read from receipt |
+| `normalized_name` | string or null | yes | Normalized candidate name |
+| `category_name` | string or null | yes | Accounting category candidate |
+| `purchased_quantity` | number or null | yes | Quantity in receipt unit |
+| `purchased_unit` | string or null | yes | Unit as purchased |
+| `base_quantity` | number or null | yes | Quantity converted to app base unit |
+| `base_unit` | string or null | yes | App base unit |
+| `unit_price` | integer or null | yes | Unit price candidate |
+| `line_total` | integer or null | yes | Item line total |
+| `is_inventory_target` | boolean or null | yes | Candidate for inventory tracking |
+| `confidence` | number or null | yes | 0.0 to 1.0 confidence candidate |
+| `warnings` | array of string | yes | Item-level warnings |
+
+## HTTP status rules
+
+| Status | When |
+|---:|---|
+| 200 | Extraction succeeded and candidate data is returned |
+| 400 | Invalid request or unsupported MIME type |
+| 413 | Uploaded file exceeds `MAX_IMAGE_BYTES` |
+| 422 | Image is valid but cannot be interpreted as a receipt, or final data fails validation |
+| 502 | Gemini or OpenAI provider fails |
+| 500 | Unexpected server error |
+
+## Important behavior
+
+`POST /ocr/receipts/extract` must not register data in a database.
+
+`product_id` and `category_id` must not be returned by the OCR API because this service does not own database master data.
+
+The response must be suitable for frontend correction before final database registration.
+
+## Manual live test example
+
+A human developer may run live testing by setting environment variables only for the current shell command.
+Do not store these values in files.
+
+```bash
+OPENAI_API_KEY="..." \
+GEMINI_API_KEY="..." \
+uv run uvicorn app.main:app --reload
+```
+
+Then, in another terminal:
+
+```bash
+curl -X POST "http://127.0.0.1:8000/ocr/receipts/extract" \
+  -F "file=@sample_receipt.jpg;type=image/jpeg"
+```
+
+Do not ask Codex to run this live test.

@@ -1,132 +1,88 @@
 # Milestone 01: Schema and Image Validation
 
-## 目的
+## Goal
 
-OCR API のレスポンス schema と、画像アップロード検証を実装する。
+Add Pydantic response schemas and local image validation utilities.
 
-この段階では、外部 API 呼び出しはまだ実装しない。
+Do not call Gemini or OpenAI in this milestone.
 
-## 実装対象
+## Scope
 
-- `app/schemas/ocr.py`
-- `app/utils/image_validation.py`
-- 画像 MIME type 検証
-- 画像サイズ検証
-- OCR レスポンス Pydantic model
-- schema の単体テスト
-- image validation の単体テスト
+Implement:
 
-## OCR Response Schema
+- OCR response schemas in `app/schemas/ocr.py`
+- Image validation utility in `app/utils/image_validation.py`
+- Unit tests for schemas and image validation
 
-`OcrReceiptResponse` を実装する。
+## Required schemas
 
-フィールド:
+Create schemas matching `docs/STRUCTURED_OUTPUT_SCHEMA.md`.
 
-```txt
-status: Literal["needs_confirmation"]
-store_name: str | None
-purchased_at: str | None
-total_amount: int | None
-items: list[OcrReceiptItem]
-warnings: list[str]
+Suggested models:
+
+- `ReceiptOcrItem`
+- `ReceiptOcrResponse`
+
+## Required schema rules
+
+- `status` must be `needs_confirmation`
+- `purchased_at` must be `YYYY-MM-DD` or null
+- `total_amount`, `unit_price`, `line_total` must be null or >= 0
+- `purchased_quantity`, `base_quantity` must be null or > 0
+- `confidence` must be null or between 0 and 1
+- `warnings` must always be a list
+- item `warnings` must always be a list
+
+## Image validation rules
+
+Allowed MIME types are read from settings:
+
+```text
+image/jpeg,image/png,image/webp
 ```
 
-`OcrReceiptItem` を実装する。
+Default maximum size:
 
-フィールド:
-
-```txt
-raw_name: str | None
-normalized_name: str | None
-category_name: str | None
-purchased_quantity: float | None
-purchased_unit: str | None
-base_quantity: float | None
-base_unit: str | None
-unit_price: int | None
-line_total: int | None
-is_inventory_target: bool | None
-confidence: float | None
-warnings: list[str]
+```text
+10485760
 ```
 
-## バリデーション
+Validation must reject:
 
-### 金額
+- Empty files
+- Unsupported MIME types
+- Files larger than max size
 
-次は `null` または 0 以上。
+## Error behavior
 
-- `total_amount`
-- `unit_price`
-- `line_total`
+Utility functions may raise internal exceptions or return validation results.
+Route-level HTTP behavior will be implemented later.
 
-### 数量
+## Forbidden work
 
-次は `null` または 0 より大きい。
+Do not implement:
 
-- `purchased_quantity`
-- `base_quantity`
+- Real OCR endpoint behavior
+- Gemini provider
+- OpenAI provider
+- Database calls
+- `.env` or `.env.example`
 
-### confidence
+## Required tests
 
-`null` または 0 以上 1 以下。
+- Valid schema with null fields passes
+- Invalid `status` fails
+- Invalid date format fails
+- Negative amount fails
+- Invalid confidence fails
+- JPEG MIME type passes
+- Unsupported MIME type fails
+- Empty file fails
+- Oversized file fails
 
-### purchased_at
-
-`null` または `YYYY-MM-DD`。
-
-## image_validation
-
-関数例:
-
-```python
-def validate_image_upload(
-    *,
-    content_type: str | None,
-    content_length: int,
-    allowed_mime_types: set[str],
-    max_image_bytes: int,
-) -> None:
-    ...
-```
-
-または、実装上扱いやすい形にしてよい。
-
-## エラー
-
-次のアプリ内例外を定義して使う。
-
-```txt
-InvalidImageTypeError
-ImageTooLargeError
-InvalidImageError
-```
-
-HTTPException を utility 内で直接作るより、route 側で HTTP に変換しやすい形を推奨する。
-
-## テスト
-
-追加するテスト:
-
-- 正常な `OcrReceiptResponse` が作れる
-- `null` を含む `OcrReceiptResponse` が作れる
-- 負の金額は validation error
-- 0 以下の数量は validation error
-- confidence が 1 を超えると validation error
-- 不正な日付形式は validation error
-- 許可 MIME type は通る
-- 不正 MIME type はエラー
-- サイズ超過はエラー
-
-## 完了条件
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
-
-## 非対象
-
-- Gemini 呼び出し
-- OpenAI 呼び出し
-- extract API の本実装

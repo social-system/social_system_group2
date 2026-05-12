@@ -1,86 +1,73 @@
 # Milestone 05: Gemini Provider Implementation
 
-## 目的
+## Goal
 
-Gemini を使ってレシート画像から中間情報を抽出する provider を実装する。
+Implement the real Gemini provider behind the existing interface.
 
-Gemini の出力は最終レスポンスではない。必ず OpenAI Structured Outputs に渡す中間情報として扱う。
+This milestone must still keep tests mocked and must not require live API keys.
 
-## 実装対象
+## Scope
 
-- `app/providers/gemini_provider.py` の実 API 呼び出し
-- API キーとモデル名の settings 化
-- Gemini 用プロンプト
-- 失敗時の例外変換
-- provider 単体テストは外部 API をモック
+Implement:
 
-## 入力
+- Real Gemini provider class
+- Prompt construction for receipt image reading
+- Configuration key check at provider execution time
+- Unit tests using mocks, not real API calls
 
-```txt
-image_bytes: bytes
-mime_type: str
-```
+## Provider responsibility
 
-## 出力
+The provider receives:
 
-```python
-GeminiExtractionResult(text="...")
-```
+- image bytes
+- MIME type
 
-## プロンプト方針
+It returns:
 
-Gemini には次を指示する。
+- intermediate text or JSON-like receipt extraction string
 
-```txt
-日本のレシート画像から読み取れる情報を抽出してください。
-店舗名、購入日、合計金額、商品明細、数量、単位、単価、明細金額、割引、税、小計を分けてください。
-読めない値は不明と書いてください。
-推測で補完しすぎないでください。
-この出力は後続の構造化処理に渡されます。
-```
+## Required prompt behavior
 
-## 出力形式
+The Gemini prompt should ask for visible receipt information:
 
-Gemini の出力は、厳密 JSON でなくてもよい。
+- Store name
+- Purchase date
+- Total amount
+- Item rows
+- Quantities and units when visible
+- Unit price and line total when visible
+- Warnings for unclear lines
 
-ただし、後続処理が扱いやすいように、見出し付きテキストまたは JSON 風テキストを推奨する。
+Gemini output is not final. It will be normalized by OpenAI Structured Outputs.
 
-例:
+## Missing API key rule
 
-```txt
-店舗名: サンプルスーパー
-購入日: 2026/05/12
-合計金額: 636円
-明細:
-- タマゴM 10コ / 238円
-- センザイ / 398円
-警告:
-- なし
-```
+If `GEMINI_API_KEY` is missing during real provider execution, raise `ProviderConfigurationError`.
 
-## エラー処理
+Do not expose key names or environment contents in public route responses.
 
-Gemini API 呼び出しで失敗した場合は、`GeminiProviderError` を投げる。
+## Secret rule
 
-API レスポンス本文全体を例外 message に入れない。
+Do not print or log `GEMINI_API_KEY`.
+Do not run live provider tests in Codex.
 
-## テスト
+## Required tests
 
-外部 API を直接呼ばない。
+Use SDK/client mocks.
 
-追加するテスト:
+- Provider builds a request using image bytes and MIME type
+- Provider returns text from mocked Gemini response
+- Missing API key raises configuration error
+- SDK failure raises provider execution error
 
-- Gemini クライアント成功時に `GeminiExtractionResult` を返す
-- Gemini クライアント失敗時に `GeminiProviderError` を投げる
-- API キー未設定時の挙動が明確である
-
-## 完了条件
+## Completion commands
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-## 注意
+## Manual verification
 
-このマイルストーン後も、Gemini 出力を API レスポンスとして直接返してはいけない。
+If live verification is needed, provide commands for the human developer only.
+Do not run them.

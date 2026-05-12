@@ -1,87 +1,73 @@
 # Milestone 04: Extract Endpoint
 
-## 目的
+## Goal
 
-`POST /ocr/receipts/extract` を実装し、画像アップロードから OCR service 実行までをつなぐ。
+Implement `POST /ocr/receipts/extract` using image validation and the receipt OCR service.
 
-この段階では、provider は fake または実 provider のどちらでもよいが、テストでは必ずモックする。
+Use fake or injectable providers in tests.
+Do not call live Gemini or OpenAI APIs.
 
-## 実装対象
+## Scope
 
-- `POST /ocr/receipts/extract`
-- multipart file 受け取り
-- MIME type 検証
-- サイズ検証
-- service 呼び出し
-- エラーを HTTP レスポンスに変換
-- API テスト
+Implement:
 
-## Request
+- Route for `POST /ocr/receipts/extract`
+- HTTP error mapping
+- Endpoint tests with fake providers
 
-```txt
+## Endpoint
+
+### POST /ocr/receipts/extract
+
+Request:
+
+```text
 multipart/form-data
-field: file
+file=<receipt image>
 ```
 
-## Response
+Response:
 
-正常時:
+`ReceiptOcrResponse` with `status = needs_confirmation`.
 
-```json
-{
-  "status": "needs_confirmation",
-  "store_name": null,
-  "purchased_at": null,
-  "total_amount": null,
-  "items": [],
-  "warnings": []
-}
-```
+## HTTP error mapping
 
-## 処理手順
+| Case | Status |
+|---|---:|
+| Unsupported MIME type | 400 |
+| Empty file | 400 |
+| Image too large | 413 |
+| Provider failure | 502 |
+| Structured data validation failure | 422 |
+| Unexpected error | 500 |
 
-```txt
-1. UploadFile を受け取る
-2. file が存在するか確認する
-3. content_type を確認する
-4. bytes を読み込む
-5. サイズを確認する
-6. ReceiptOcrService.extract_receipt を呼ぶ
-7. OcrReceiptResponse を返す
-```
+## Dependency injection
 
-## エラー変換
+Endpoint tests must inject fake service or fake providers.
 
-| app error | HTTP status | code |
-|---|---:|---|
-| Missing file | 400 | `missing_file` |
-| InvalidImageTypeError | 400 | `invalid_image_type` |
-| ImageTooLargeError | 413 | `image_too_large` |
-| InvalidImageError | 422 | `invalid_image` |
-| GeminiProviderError | 502 | `gemini_provider_failed` |
-| OpenAIProviderError | 502 | `openai_provider_failed` |
-| StructuredOutputError | 422 | `structured_validation_failed` |
+Do not require real API keys.
+Do not require `.env` files.
 
-## テスト
+## Forbidden work
 
-追加するテスト:
+Do not implement:
 
-- 正常な画像で `200`
-- `status = needs_confirmation`
-- 不正 MIME type で `400`
-- サイズ超過で `413`
-- Gemini provider 失敗で `502`
-- OpenAI provider 失敗で `502`
-- Structured validation 失敗で `422`
+- Live Gemini API call
+- Live OpenAI API call
+- DB registration
+- Image persistence
+- `.env` or `.env.example`
 
-## 実装上の注意
+## Required tests
 
-- `UploadFile.content_type` だけを完全に信用しすぎない。ただし MVP では content_type 検証を最優先にする。
-- 画像 bytes をログに出さない。
-- 読み込んだ bytes をファイル保存しない。
-- service を route 内で直接 new してもよいが、テストしづらい場合は dependency にする。
+- Valid image returns 200 and `needs_confirmation`
+- Unsupported MIME type returns 400
+- Empty file returns 400
+- Oversized file returns 413
+- Provider failure returns 502
+- Invalid structured response returns 422 or controlled error according to implementation
 
-## 完了条件
+## Completion commands
 
 ```bash
 uv run python -m compileall app

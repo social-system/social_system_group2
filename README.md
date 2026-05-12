@@ -8,10 +8,9 @@
 
 ```bash
 uv sync
-cp .env.example .env
 ```
 
-`.env` はローカル環境用です。API キーなどの秘密情報はコードに直書きしないでください。
+API キーなどの秘密情報はプロジェクトファイルに保存しないでください。このプロジェクトは `.env` ファイルを使いません。
 
 ## Run
 
@@ -39,3 +38,5 @@ curl http://localhost:8000/health
   "status": "ok"
 }
 ```
+
+この段階では、OCR処理、画像アップロード、Gemini/OpenAI provider、DB登録は未実装です。
