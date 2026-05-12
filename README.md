@@ -1,18 +1,30 @@
-# レシート管理バックエンド
+# レシート・家計簿データベース API
 
-一人用のローカル家計簿として使う、レシート管理バックエンドです。
+このリポジトリは、レシート OCR の結果を直接保存するためのものではなく、ユーザーが確認した購入履歴を保存するバックエンドです。
 
-FastAPI、SQLAlchemy、SQLite を使い、レシートの登録、一覧取得、詳細取得、削除を行います。
+OCR は誤読や欠損を含む可能性があるため、OCR 結果は一度フロントエンドに返し、ユーザーが修正・確認した後で、この API に登録します。
 
-## 主な機能
+```text
+レシート画像
+  -> OCR API
+  -> Gemini で画像読解
+  -> OpenAI Structured Outputs で仮 JSON 化
+  -> フロントエンドでユーザー確認
+  -> この DB API に確定データとして登録
+  -> 家計簿・在庫管理・AI レシピ提案で利用
+```
 
-- レシート登録
-- レシート一覧取得
-- レシート詳細取得
-- レシート削除
-- レシート登録時のバリデーション
-- テスト用 SQLite DB を使った API テスト
-- React + TypeScript フロントエンドからの呼び出しに必要な CORS 設定
+## この API の責務
+
+この API の責務は、確認済みの購入履歴を保存し、次の機能から使える形にすることです。
+
+| 利用先 | 必要なデータ |
+| --- | --- |
+| 家計簿 | 購入日、店舗名、カテゴリ、金額 |
+| 在庫管理 | 商品名、数量、単位、在庫対象かどうか |
+| AI レシピ提案 | 正規化された商品名、共通単位の数量 |
+
+この API は OCR を実行しません。画像ファイルも保存しません。
 
 ## 使用技術
 
@@ -24,23 +36,240 @@ FastAPI、SQLAlchemy、SQLite を使い、レシートの登録、一覧取得�
 - pytest
 - uv
 
-## ディレクトリ構成
+## 設計方針
+
+開発初期のため、既存テーブルとの互換性は維持せず、テーブル定義を作り直します。
+
+現時点では一人用のローカルアプリとして扱うため、認証、ユーザー管理、世帯管理、`user_id` によるデータ分離は実装しません。
+
+商品名は、レシート上の表記とアプリ内で扱う表記を分けます。
 
 ```text
-app/
-  common/              # 日付変換などの共通処理
-  crud/                # DB 操作、業務ルール検証
-  db/                  # DB セッション設定
-  receipts/            # SQLAlchemy モデル
-  routes/              # FastAPI ルーター
-  schemas/             # Pydantic スキーマ
-tests/                 # API テスト
-docs/milestone/        # 実装マイルストーン
+raw_name           レシート上の商品名
+normalized_name    アプリ内で扱う商品名
 ```
 
-## セットアップ
+数量と単位も、購入時の表記と在庫・レシピ用の共通単位を分けます。
 
-依存関係をインストールします。
+```text
+purchased_quantity / purchased_unit    購入時の数量と単位
+base_quantity / base_unit              在庫・レシピ用に変換した数量と単位
+```
+
+例:
+
+```json
+{
+  "raw_name": "卵 1パック",
+  "normalized_name": "卵",
+  "purchased_quantity": 1,
+  "purchased_unit": "パック",
+  "base_quantity": 10,
+  "base_unit": "個"
+}
+```
+
+## 主要テーブル
+
+詳細は `docs/DATABASE_DESIGN.md` を参照してください。
+
+```text
+receipts
+receipt_items
+accounting_categories
+products
+product_aliases
+product_unit_conversions
+```
+
+## API
+
+### ヘルスチェック
+
+```http
+GET /
+```
+
+Response:
+
+```json
+{
+  "status": "ok"
+}
+```
+
+### レシート登録
+
+```http
+POST /receipts
+```
+
+フロントエンドでユーザー確認が完了したレシートだけを登録します。
+
+Request:
+
+```json
+{
+  "purchased_at": 20260512,
+  "store_name": "サンプルスーパー",
+  "total_amount": 636,
+  "items": [
+    {
+      "raw_name": "タマゴM 10コ",
+      "normalized_name": "卵",
+      "product_id": 1,
+      "category_id": 1,
+      "purchased_quantity": 1,
+      "purchased_unit": "パック",
+      "base_quantity": 10,
+      "base_unit": "個",
+      "unit_price": 238,
+      "line_total": 238,
+      "is_inventory_target": true
+    },
+    {
+      "raw_name": "センザイ",
+      "normalized_name": "洗剤",
+      "product_id": null,
+      "category_id": 2,
+      "purchased_quantity": 1,
+      "purchased_unit": "個",
+      "base_quantity": null,
+      "base_unit": null,
+      "unit_price": 398,
+      "line_total": 398,
+      "is_inventory_target": false
+    }
+  ]
+}
+```
+
+Response:
+
+```json
+{
+  "id": 1,
+  "purchased_at": 20260512,
+  "store_name": "サンプルスーパー",
+  "total_amount": 636,
+  "items_total": 636,
+  "adjustment_amount": 0,
+  "item_count": 2
+}
+```
+
+`items_total` と `adjustment_amount` はサーバー側で計算します。
+
+```text
+items_total = sum(item.line_total)
+adjustment_amount = total_amount - items_total
+```
+
+レシートには割引、ポイント利用、税、OCR 漏れがあるため、`total_amount == items_total` は必須条件にしません。
+
+### レシート一覧取得
+
+```http
+GET /receipts
+```
+
+Query parameters:
+
+| 名前 | 内容 |
+| --- | --- |
+| `skip` | 取得開始位置 |
+| `limit` | 取得件数 |
+| `date_from` | 開始日。`YYYYMMDD` 形式 |
+| `date_to` | 終了日。`YYYYMMDD` 形式 |
+| `category_id` | カテゴリで絞り込む場合に指定 |
+| `inventory_only` | `true` の場合、在庫対象を含むレシートだけを対象にする |
+
+Response:
+
+```json
+[
+  {
+    "id": 1,
+    "purchased_at": 20260512,
+    "store_name": "サンプルスーパー",
+    "total_amount": 636,
+    "items_total": 636,
+    "adjustment_amount": 0,
+    "item_count": 2
+  }
+]
+```
+
+### レシート詳細取得
+
+```http
+GET /receipts/{receipt_id}
+```
+
+Response:
+
+```json
+{
+  "id": 1,
+  "purchased_at": 20260512,
+  "store_name": "サンプルスーパー",
+  "total_amount": 636,
+  "items_total": 636,
+  "adjustment_amount": 0,
+  "items": [
+    {
+      "id": 1,
+      "raw_name": "タマゴM 10コ",
+      "normalized_name": "卵",
+      "product_id": 1,
+      "category_id": 1,
+      "purchased_quantity": "1.00",
+      "purchased_unit": "パック",
+      "base_quantity": "10.00",
+      "base_unit": "個",
+      "unit_price": 238,
+      "line_total": 238,
+      "is_inventory_target": true
+    }
+  ]
+}
+```
+
+Decimal は JSON では文字列または数値のどちらでもよいですが、プロジェクト内で統一してください。推奨は文字列です。
+
+### レシート削除
+
+```http
+DELETE /receipts/{receipt_id}
+```
+
+Response:
+
+```json
+{
+  "deleted": true,
+  "id": 1
+}
+```
+
+## バリデーション
+
+| 条件 | ステータス |
+| --- | ---: |
+| `items` が空 | 422 |
+| `purchased_at` が実在しない日付 | 422 |
+| `total_amount` が 0 未満 | 422 |
+| `raw_name` が空 | 422 |
+| `purchased_quantity` が 0 以下 | 422 |
+| `line_total` が 0 未満 | 422 |
+| `is_inventory_target = true` なのに `normalized_name` が空 | 422 |
+| `is_inventory_target = true` なのに `base_quantity` または `base_unit` が空 | 422 |
+| 存在しない `receipt_id` | 404 |
+| 存在しない `product_id` または `category_id` | 400 |
+
+`unit_price * purchased_quantity == line_total` は必須条件にしません。税込価格、まとめ割、量り売り、小数数量でずれることがあるためです。
+
+## セットアップ
 
 ```bash
 uv sync
@@ -54,223 +283,32 @@ source .venv/bin/activate
 
 ## 起動方法
 
-バックエンド API を起動します。
-
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-通常は以下の URL で起動します。
+通常は以下で起動します。
 
 ```text
 http://localhost:8000
 ```
 
-ヘルスチェック:
-
-```bash
-curl http://localhost:8000/
-```
-
-レスポンス例:
-
-```json
-{
-  "status": "ok"
-}
-```
-
-## API
-
-### レシート登録
-
-```http
-POST /receipts
-```
-
-リクエスト例:
-
-```json
-{
-  "receipt_total": 500,
-  "items": [
-    {
-      "item": "milk",
-      "num": 1,
-      "amount": 500,
-      "total": 500,
-      "date": 20260428,
-      "ingredients": 1
-    }
-  ]
-}
-```
-
-成功時は `201 Created` を返します。
-
-### レシート一覧取得
-
-```http
-GET /receipts
-```
-
-クエリパラメータ:
-
-| 名前 | 内容 |
-| --- | --- |
-| `skip` | 取得開始位置 |
-| `limit` | 取得件数 |
-| `date_from` | 開始日。`YYYYMMDD` 形式 |
-| `date_to` | 終了日。`YYYYMMDD` 形式 |
-
-レスポンス例:
-
-```json
-[
-  {
-    "id": 1,
-    "receipt_total": 500,
-    "item_count": 1,
-    "date_min": 20260428,
-    "date_max": 20260428
-  }
-]
-```
-
-### レシート詳細取得
-
-```http
-GET /receipts/{receipt_id}
-```
-
-存在しない ID の場合は `404 Not Found` を返します。
-
-### レシート削除
-
-```http
-DELETE /receipts/{receipt_id}
-```
-
-レスポンス例:
-
-```json
-{
-  "deleted": true,
-  "id": 1
-}
-```
-
-存在しない ID の場合は `404 Not Found` を返します。
-
-## バリデーション
-
-主な入力チェックは以下です。
-
-| 条件 | ステータス |
-| --- | ---: |
-| `items` が空 | 422 |
-| `date` が実在しない | 422 |
-| `item` が空 | 422 |
-| `num` が 0 以下 | 422 |
-| `amount` が 0 未満 | 422 |
-| `total` が 0 未満 | 422 |
-| `num * amount != total` | 400 |
-| `receipt_total != sum(items.total)` | 400 |
-| 存在しないレシート取得 | 404 |
-| 存在しないレシート削除 | 404 |
-
-`date` は `YYYYMMDD` 形式の整数として受け取ります。
-
-例:
-
-- `20260428`: 有効
-- `20260230`: 無効
-
-## DB
-
-通常実行時は、プロジェクト直下の SQLite DB を使います。
-
-```text
-receipts.db
-```
-
-テーブルは大きく 2 つです。
-
-- `receipts`: レシート本体
-- `receipt_items`: レシート明細
-
-親レシートを削除すると、関連する明細も削除されます。
-
 ## テスト
-
-テストを実行します。
 
 ```bash
 uv run pytest
 ```
 
-テストでは通常開発用の `receipts.db` は使わず、テスト用 SQLite DB に差し替えます。
+テストでは通常開発用の `receipts.db` を使わず、テスト用 SQLite DB に差し替えます。
 
-## フロントエンド連携
+## Codex で実装する場合
 
-React + TypeScript + Vite のフロントエンドから API を呼び出す場合、バックエンドを先に起動します。
-
-```bash
-uv run uvicorn app.main:app --reload
-```
-
-別ターミナルでフロントエンドを起動します。
-
-```bash
-cd frontend
-VITE_API_BASE_URL=http://localhost:8000 npm run dev
-```
-
-ブラウザで以下を開きます。
+Codex に作業させる前に、以下を確認させてください。
 
 ```text
-http://localhost:5173
+AGENTS.md
+docs/DATABASE_DESIGN.md
+docs/CODEX_IMPLEMENTATION_PLAN.md
 ```
 
-このバックエンドでは、Vite の標準開発サーバーから呼び出せるように、以下の origin を CORS で許可しています。
-
-```text
-http://localhost:5173
-```
-
-## 連携確認の流れ
-
-最低限、以下を確認します。
-
-1. 一覧画面で `GET /receipts` が成功する
-2. 登録画面で `POST /receipts` が成功する
-3. 登録後、一覧にレシートが表示される
-4. 詳細画面で `GET /receipts/{receipt_id}` が成功する
-5. 一覧または詳細画面から `DELETE /receipts/{receipt_id}` が成功する
-6. 削除後、同じ ID の詳細取得が `404` になる
-7. API エラーが画面に表示される
-
-## 現時点で実装しないもの
-
-このプロジェクトは当面、一人用のローカルアプリとして開発します。
-
-そのため、現時点では以下を実装していません。
-
-- 認証
-- ユーザー管理
-- 世帯管理
-- `user_id` によるデータ分離
-- OCR 連携
-- レシート更新 API
-- 集計 API
-- Alembic などのマイグレーション
-- 本番用 DB 構成
-- 外部サービス連携
-
-## 開発時の注意
-
-- GitHub への push は手動確認後に行います
-- テストでは通常開発用の `receipts.db` を使わないようにします
-- バックエンド API のフィールド名は snake_case です
-- フロントエンドから登録する場合も、API 通信時は `receipt_total` などのフィールド名をそのまま使います
-- 不正な入力値は、形式不正なら `422`、業務ルール不整合なら `400` を返します
+今回の方針ではテーブル定義を作り直すため、既存 DB の互換性維持は不要です。ただし、実レシートデータが入っている `receipts.db` を勝手に削除しないでください。

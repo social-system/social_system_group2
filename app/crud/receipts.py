@@ -1,24 +1,24 @@
 from dataclasses import dataclass
 
 from sqlalchemy import select
-from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.common.date import format_yyyymmdd, parse_yyyymmdd
-from app.receipts.models import Receipt
-from app.receipts.models import ReceiptItem
+from app.receipts.models import Receipt, ReceiptItem
 
 
 @dataclass(frozen=True)
 class ReceiptSummary:
     id: int
-    receipt_total: int
+    purchased_at: int
+    store_name: str | None
+    total_amount: int
+    items_total: int
+    adjustment_amount: int
     item_count: int
-    date_min: int
-    date_max: int
 
 
-def get_receipt(db: Session, receipt_id: int) -> Receipt | None:
+def get_receipt_detail(db: Session, receipt_id: int) -> Receipt | None:
     statement = (
         select(Receipt)
         .options(selectinload(Receipt.items))
@@ -33,41 +33,42 @@ def list_receipts(
     limit: int = 50,
     date_from: int | None = None,
     date_to: int | None = None,
+    category_id: int | None = None,
+    inventory_only: bool = False,
 ) -> list[ReceiptSummary]:
-    statement = (
-        select(
-            Receipt.id,
-            Receipt.receipt_total,
-            func.count(ReceiptItem.id).label("item_count"),
-            func.min(ReceiptItem.date).label("date_min"),
-            func.max(ReceiptItem.date).label("date_max"),
-        )
-        .join(Receipt.items)
-        .group_by(Receipt.id, Receipt.receipt_total)
-        .order_by(Receipt.id)
-        .offset(skip)
-        .limit(limit)
-    )
+    statement = select(Receipt).options(selectinload(Receipt.items)).order_by(Receipt.id)
 
     if date_from is not None:
-        statement = statement.where(ReceiptItem.date >= parse_yyyymmdd(date_from))
+        statement = statement.where(Receipt.purchased_at >= parse_yyyymmdd(date_from))
     if date_to is not None:
-        statement = statement.where(ReceiptItem.date <= parse_yyyymmdd(date_to))
+        statement = statement.where(Receipt.purchased_at <= parse_yyyymmdd(date_to))
+
+    if category_id is not None or inventory_only:
+        statement = statement.join(Receipt.items).distinct()
+        if category_id is not None:
+            statement = statement.where(ReceiptItem.category_id == category_id)
+        if inventory_only:
+            statement = statement.where(ReceiptItem.is_inventory_target.is_(True))
+
+    statement = statement.offset(skip).limit(limit)
+    receipts = db.scalars(statement).all()
 
     return [
         ReceiptSummary(
-            id=row.id,
-            receipt_total=row.receipt_total,
-            item_count=row.item_count,
-            date_min=format_yyyymmdd(row.date_min),
-            date_max=format_yyyymmdd(row.date_max),
+            id=receipt.id,
+            purchased_at=format_yyyymmdd(receipt.purchased_at),
+            store_name=receipt.store_name,
+            total_amount=receipt.total_amount,
+            items_total=receipt.items_total,
+            adjustment_amount=receipt.adjustment_amount,
+            item_count=len(receipt.items),
         )
-        for row in db.execute(statement)
+        for receipt in receipts
     ]
 
 
 def delete_receipt(db: Session, receipt_id: int) -> int | None:
-    receipt = get_receipt(db, receipt_id)
+    receipt = get_receipt_detail(db, receipt_id)
     if receipt is None:
         return None
 

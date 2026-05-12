@@ -3,35 +3,75 @@
 以下を既存の `PROJECT STATUS.md` の末尾に追記する。
 
 ```md
-## 現時点の設計方針
+## DB 再設計方針
 
-このアプリは、当面は一人用のローカル家計簿として開発する。
+現在の DB は、レシート OCR 結果を直接保存する場所ではなく、ユーザー確認済みの購入履歴を保存する場所として再設計する。
 
-そのため、現段階では認証、ユーザー管理、世帯管理、ユーザーごとのデータ分離は実装しない。DB は SQLite を前提とし、ローカル環境での利用を優先する。
+OCR 結果は誤読や欠損を含む可能性があるため、OCR API は一度フロントエンドに仮データを返す。ユーザーが内容を確認・修正した後、DB API に確定データとして登録する。
 
-次の開発では、レシート登録機能を土台として、登録済みデータを確認・削除できる機能を追加する。具体的には、レシート一覧取得、レシート詳細取得、レシート削除、バリデーション強化、テスト追加を優先する。
+```text
+レシート画像
+  -> OCR API
+  -> 仮データ
+  -> フロントエンド確認
+  -> DB API
+  -> 確定データ保存
+```
 
-更新 API、集計 API、OCR 連携、商品名の正規化、認証機能は、基本的な登録・取得・削除が安定してから検討する。
+## テーブル作り直し
 
-## 次の開発単位
+開発初期のため、既存テーブルとの互換性は維持しない。
 
-次の開発は、`doc/milestone/` 配下のマイルストーン文書に従って、1つずつ実装する。
+既存の `receipt_total`、`item`、`num`、`amount`、`total`、`date`、`ingredients` を中心にした設計は廃止する。
 
-| 順番 | ファイル | 目的 |
-| ---: | --- | --- |
-| 1 | `doc/milestone/MILESTONE01.md` | リクエストスキーマのバリデーションを強化する |
-| 2 | `doc/milestone/MILESTONE02.md` | レシート詳細取得の CRUD 処理を追加する |
-| 3 | `doc/milestone/MILESTONE03.md` | `GET /receipts/{receipt_id}` を追加する |
-| 4 | `doc/milestone/MILESTONE04.md` | レシート一覧取得の CRUD 処理を追加する |
-| 5 | `doc/milestone/MILESTONE05.md` | `GET /receipts` を追加する |
-| 6 | `doc/milestone/MILESTONE06.md` | レシート削除の CRUD 処理を追加する |
-| 7 | `doc/milestone/MILESTONE07.md` | `DELETE /receipts/{receipt_id}` を追加する |
-| 8 | `doc/milestone/MILESTONE08.md` | テスト用 DB 設定を追加する |
-| 9 | `doc/milestone/MILESTONE09.md` | 登録、取得、削除、異常系のテストを追加する |
+新しい主なテーブルは以下とする。
+
+| テーブル | 目的 |
+| --- | --- |
+| `receipts` | レシート全体 |
+| `receipt_items` | レシート明細 |
+| `accounting_categories` | 家計簿カテゴリ |
+| `products` | 商品マスタ |
+| `product_aliases` | レシート表記と商品マスタの対応 |
+| `product_unit_conversions` | 商品ごとの単位変換 |
+
+## 重要な設計判断
+
+商品名は、レシート上の名前とアプリ内の名前を分ける。
+
+```text
+raw_name: レシート上の商品名
+normalized_name: アプリ内で扱う商品名
+```
+
+数量と単位は、購入時の表記と在庫・レシピ用の共通単位を分ける。
+
+```text
+purchased_quantity / purchased_unit
+base_quantity / base_unit
+```
+
+同じ商品でも単位が異なる場合は、レシート明細としては別々に保存し、在庫管理では `base_quantity` と `base_unit` で集計する。
+
+例:
+
+```text
+卵 1パック -> 10個
+卵 6個     -> 6個
+在庫合計   -> 16個
+```
 
 ## Codex による実装方針
 
-Codex に実装を依頼する場合は、リポジトリ直下の `AGENTS.md` に従う。
+Codex に実装を依頼する場合は、以下を最初に読ませる。
 
-Codex は一度に複数のマイルストーンを進めず、指定された `MILESTONE0X.md` の範囲だけを実装する。マイルストーンの範囲外となる認証、ユーザー管理、OCR、集計 API、DB マイグレーション、広範囲なリファクタリングは行わない。
+```text
+AGENTS.md
+docs/DATABASE_DESIGN.md
+docs/API_SPEC.md
+docs/OCR_DB_INTERFACE.md
+docs/CODEX_IMPLEMENTATION_PLAN.md
+```
+
+今回の実装では、OCR API、画像保存、OCR 仮データ保存、在庫テーブル、レシピ提案 API、認証、ユーザー管理は実装しない。
 ```
