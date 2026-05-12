@@ -1,4 +1,4 @@
-# レシート・家計簿データベース API
+# レシート・家計簿・在庫データベース API
 
 このリポジトリは、レシート OCR の結果を直接保存するためのものではなく、ユーザーが確認した購入履歴を保存するバックエンドです。
 
@@ -11,20 +11,54 @@ OCR は誤読や欠損を含む可能性があるため、OCR 結果は一度フ
   -> OpenAI Structured Outputs で仮 JSON 化
   -> フロントエンドでユーザー確認
   -> この DB API に確定データとして登録
+  -> 在庫対象の商品を在庫へ反映
   -> 家計簿・在庫管理・AI レシピ提案で利用
 ```
 
 ## この API の責務
 
-この API の責務は、確認済みの購入履歴を保存し、次の機能から使える形にすることです。
+この API の責務は、確認済みの購入履歴と現在在庫を保存し、次の機能から使える形にすることです。
 
 | 利用先 | 必要なデータ |
 | --- | --- |
 | 家計簿 | 購入日、店舗名、カテゴリ、金額 |
-| 在庫管理 | 商品名、数量、単位、在庫対象かどうか |
-| AI レシピ提案 | 正規化された商品名、共通単位の数量 |
+| 在庫管理 | 商品名、数量、単位、保管場所、期限、増減履歴 |
+| AI レシピ提案 | 正規化された商品名、現在数量、共通単位、期限 |
 
-この API は OCR を実行しません。画像ファイルも保存しません。
+この API は OCR を実行しません。画像ファイルも保存しません。料理AIもこの API の内部では実行せず、外部のAI機能が在庫APIのレスポンスを読んで献立やレシピを提案する構成です。
+
+## 現在実装されている機能
+
+| 区分 | 内容 |
+| --- | --- |
+| レシート管理 | 確認済みレシートの登録、一覧、詳細、削除 |
+| 明細管理 | 購入時の商品名・数量と、在庫/レシピ用の正規化名・共通単位を保存 |
+| 家計簿連携 | 購入日、店舗、カテゴリ、支払額、明細合計、差額を取得可能 |
+| 在庫反映 | レシート明細のうち在庫対象の商品を在庫ロットへ反映 |
+| 在庫残量 | 商品単位の現在在庫を取得 |
+| 在庫ロット | 購入日、期限、保管場所、残量、ステータスをロット単位で管理 |
+| 在庫増減履歴 | 購入反映、消費、廃棄、手動調整の履歴を保存 |
+
+## 外部機能との連携方針
+
+このバックエンドは、外部機能に対して「確定済みデータ」と「現在在庫」を提供するデータAPIです。OCR、画像保存、料理AI、フロントエンド画面そのものは別コンポーネントとして扱います。
+
+```text
+フロントエンド
+  -> OCR API から仮データを受け取る
+  -> ユーザーが購入日、店舗、金額、明細、在庫対象、共通単位を確認する
+  -> POST /receipts に確定データを送る
+  -> 必要に応じて POST /inventory/receipts/{receipt_id}/apply を呼ぶ
+  -> GET /receipts / GET /inventory/* で画面表示する
+
+料理AI・レシピ提案
+  -> GET /inventory/balances で使える食材と数量を取得する
+  -> GET /inventory/batches で期限の近い食材を取得する
+  -> 外部AI側でレシピ候補を生成する
+  -> 使用後は POST /inventory/movements で消費量を在庫から差し引く
+```
+
+フロントエンドからの利用を想定し、開発環境では `http://localhost:5173` からの CORS を許可しています。
 
 ## 使用技術
 
@@ -71,7 +105,7 @@ base_quantity / base_unit              在庫・レシピ用に変換した数�
 
 ## 主要テーブル
 
-詳細は `docs/DATABASE_DESIGN.md` を参照してください。
+レシート、商品、カテゴリの詳細は `docs/DATABASE_DESIGN.md` を参照してください。在庫管理の詳細は `docs/INVENTORY_IMPLEMENTATION_SPEC.md` を参照してください。
 
 ```text
 receipts
@@ -80,6 +114,10 @@ accounting_categories
 products
 product_aliases
 product_unit_conversions
+inventory_locations
+inventory_batches
+inventory_operations
+inventory_movements
 ```
 
 ## API
@@ -252,6 +290,209 @@ Response:
 }
 ```
 
+### レシートを在庫へ反映
+
+```http
+POST /inventory/receipts/{receipt_id}/apply
+```
+
+レシート明細のうち、`is_inventory_target = true` で、`product_id`、`base_quantity`、`base_unit` がそろっている明細を在庫ロットへ反映します。同じレシート明細は二重に在庫化しません。
+
+Request:
+
+```json
+{
+  "default_location_id": 1,
+  "expires_at_by_receipt_item_id": {
+    "31": "2026-05-20"
+  },
+  "idempotency_key": "receipt:12:apply-inventory"
+}
+```
+
+Response:
+
+```json
+{
+  "receipt_id": 12,
+  "operation_id": 100,
+  "applied_count": 1,
+  "skipped_count": 1,
+  "items": [
+    {
+      "receipt_item_id": 31,
+      "product_id": 1,
+      "product_name": "卵",
+      "quantity": "10.00",
+      "unit": "個",
+      "batch_id": 201,
+      "status": "applied"
+    },
+    {
+      "receipt_item_id": 32,
+      "product_name": "洗剤",
+      "status": "skipped",
+      "reason": "not_inventory_target"
+    }
+  ]
+}
+```
+
+### 在庫残量取得
+
+```http
+GET /inventory/balances
+```
+
+Query parameters:
+
+| 名前 | 内容 |
+| --- | --- |
+| `product_id` | 商品で絞り込む場合に指定 |
+| `location_id` | 保管場所で絞り込む場合に指定 |
+| `include_zero` | `true` の場合、残量 0 の在庫も含める |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "product_id": 1,
+      "product_name": "卵",
+      "quantity": "16.00",
+      "unit": "個",
+      "nearest_expires_at": "2026-05-20",
+      "batch_count": 2
+    }
+  ]
+}
+```
+
+### 在庫ロット一覧取得
+
+```http
+GET /inventory/batches
+```
+
+Query parameters:
+
+| 名前 | 内容 |
+| --- | --- |
+| `product_id` | 商品で絞り込む場合に指定 |
+| `location_id` | 保管場所で絞り込む場合に指定 |
+| `status` | `active` / `depleted` / `discarded` |
+| `expires_before` | 指定日以前に期限が来るもの |
+| `include_zero` | `true` の場合、残量 0 の在庫も含める |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "batch_id": 201,
+      "product_id": 1,
+      "product_name": "卵",
+      "initial_quantity": "10.00",
+      "current_quantity": "8.00",
+      "unit": "個",
+      "location_id": 1,
+      "location_name": "冷蔵",
+      "purchased_at": "2026-05-12",
+      "expires_at": "2026-05-20",
+      "status": "active",
+      "receipt_item_id": 31
+    }
+  ]
+}
+```
+
+### 在庫増減登録
+
+```http
+POST /inventory/movements
+```
+
+消費、廃棄、手動調整を登録します。`batch_id` を指定しない消費・廃棄では、期限が近いロットから順に差し引きます。現在の実装では `movement_type` は `consume`、`dispose`、`adjust` を受け取ります。`adjust` は正の数量なら手動追加、負の数量なら手動減少として扱います。
+
+Request:
+
+```json
+{
+  "product_id": 1,
+  "movement_type": "consume",
+  "quantity": "2.00",
+  "unit": "個",
+  "batch_id": null,
+  "location_id": null,
+  "reason": "夕食で使用",
+  "occurred_at": "2026-05-13T18:30:00",
+  "idempotency_key": "manual:consume:egg:20260513-001"
+}
+```
+
+Response:
+
+```json
+{
+  "operation_id": 101,
+  "movement_type": "consume",
+  "product_id": 1,
+  "product_name": "卵",
+  "requested_quantity": "2.00",
+  "unit": "個",
+  "movements": [
+    {
+      "movement_id": 301,
+      "batch_id": 201,
+      "quantity_delta": "-2.00",
+      "remaining_quantity": "8.00"
+    }
+  ]
+}
+```
+
+### 在庫増減履歴取得
+
+```http
+GET /inventory/movements
+```
+
+Query parameters:
+
+| 名前 | 内容 |
+| --- | --- |
+| `product_id` | 商品で絞り込む場合に指定 |
+| `batch_id` | 在庫ロットで絞り込む場合に指定 |
+| `operation_id` | 操作単位で絞り込む場合に指定 |
+| `movement_type` | 増減種別で絞り込む場合に指定 |
+| `from_date` | 発生日の開始日 |
+| `to_date` | 発生日の終了日 |
+| `limit` | 取得件数。既定値は 100 |
+| `offset` | 取得開始位置。既定値は 0 |
+
+Response:
+
+```json
+{
+  "items": [
+    {
+      "movement_id": 301,
+      "operation_id": 101,
+      "batch_id": 201,
+      "product_id": 1,
+      "product_name": "卵",
+      "movement_type": "consume",
+      "quantity_delta": "-2.00",
+      "unit": "個",
+      "reason": "夕食で使用",
+      "occurred_at": "2026-05-13T18:30:00"
+    }
+  ]
+}
+```
+
 ## バリデーション
 
 | 条件 | ステータス |
@@ -268,6 +509,20 @@ Response:
 | 存在しない `product_id` または `category_id` | 400 |
 
 `unit_price * purchased_quantity == line_total` は必須条件にしません。税込価格、まとめ割、量り売り、小数数量でずれることがあるためです。
+
+在庫APIでは、存在しない `receipt_id`、`product_id`、`batch_id` は `404`、存在しない `location_id`、単位不一致、在庫不足、無効な `status` は `400` として扱います。型や `quantity = 0` などのPydanticで検出できる入力不備は `422` です。
+
+## 料理AI連携で使う主なデータ
+
+料理AIやレシピ提案機能は、このバックエンドの外側で実装します。AI側へ渡す候補データは、在庫APIから取得します。
+
+| 目的 | API | 利用する主な項目 |
+| --- | --- | --- |
+| 使える食材一覧 | `GET /inventory/balances` | `product_name`, `quantity`, `unit`, `nearest_expires_at` |
+| 期限優先の提案 | `GET /inventory/batches` | `expires_at`, `current_quantity`, `location_name` |
+| 使用後の在庫反映 | `POST /inventory/movements` | `movement_type=consume`, `quantity`, `unit`, `reason` |
+
+AIに渡す場合も、購入時単位ではなく `base_quantity` / `base_unit` から作られた在庫単位を使います。たとえば「卵 1パック」は、在庫API上では「卵 10.00 個」として扱います。
 
 ## セットアップ
 
