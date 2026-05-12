@@ -1,13 +1,22 @@
-import { useState } from 'react';
-import { Camera, Receipt, ChefHat, Plus, Package } from 'lucide-react';
-import * as Tabs from '@radix-ui/react-tabs';
-import { UniversalCamera } from './components/UniversalCamera';
-import { ExpenseList } from './components/ExpenseList';
-import { InventoryList } from './components/InventoryList';
-import { RecipeList } from './components/RecipeList';
-import { AddExpenseForm } from './components/AddExpenseForm';
-import { AddInventoryForm } from './components/AddInventoryForm';
-import { AddRecipeForm } from './components/AddRecipeForm';
+import { useState } from "react";
+import {
+  Camera,
+  Receipt,
+  ChefHat,
+  Plus,
+  Package,
+  Settings,
+} from "lucide-react";
+import * as Tabs from "@radix-ui/react-tabs";
+import { useEffect } from "react";
+import { UniversalCamera } from "./components/UniversalCamera";
+import { ExpenseList } from "./components/ExpenseList";
+import { InventoryList } from "./components/InventoryList";
+import { RecipeList } from "./components/RecipeList";
+import { AddExpenseForm } from "./components/AddExpenseForm";
+import { AddInventoryForm } from "./components/AddInventoryForm";
+import { AddRecipeForm } from "./components/AddRecipeForm";
+import { SettingsModal } from "./components/SettingsModal";
 
 export interface Expense {
   id: string;
@@ -35,6 +44,13 @@ export interface InventoryItem {
   category: string;
   expiryDate?: Date;
   imageUrl?: string;
+}
+
+export interface UserSettings {
+  staples: string[]; // 常備調味料
+  likedIngredients: string[]; // 好きな食材
+  dislikedIngredients: string[]; // 嫌いな食材
+  isSetupComplete: boolean;
 }
 
 export default function App() {
@@ -109,6 +125,21 @@ export default function App() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [showAddRecipe, setShowAddRecipe] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+
+  const [settings, setSettings] = useState<UserSettings>({
+    staples: [],
+    likedIngredients: [],
+    dislikedIngredients: [],
+    isSetupComplete: false,
+  });
+
+  // 初回起動時に設定モーダルを表示
+  useEffect(() => {
+    if (!settings.isSetupComplete) {
+      setShowSettings(true);
+    }
+  }, []);
 
   const addExpense = (expense: Omit<Expense, 'id'>) => {
     const newExpense = { ...expense, id: Date.now().toString() };
@@ -145,12 +176,39 @@ export default function App() {
 
   // レシピ提案: 在庫にある材料で作れるレシピを表示
   const getSuggestedRecipes = () => {
-    const inventoryNames = inventory.map((item) => item.name.toLowerCase());
+    const inventoryNames = inventory.map((item) =>
+      item.name.toLowerCase(),
+    );
+    const staplesLower = settings.staples.map((s) =>
+      s.toLowerCase(),
+    );
+    const allAvailable = [...inventoryNames, ...staplesLower];
+    const dislikedLower = settings.dislikedIngredients.map(
+      (d) => d.toLowerCase(),
+    );
+
     return recipes.filter((recipe) => {
-      const requiredIngredients = recipe.ingredients.map((ing) => ing.toLowerCase());
+      const requiredIngredients = recipe.ingredients.map(
+        (ing) => ing.toLowerCase(),
+      );
+
+      // 嫌いな食材が含まれていたら除外
+      const hasDisliked = requiredIngredients.some((ing) =>
+        dislikedLower.some(
+          (disliked) =>
+            ing.includes(disliked) || disliked.includes(ing),
+        ),
+      );
+      if (hasDisliked) return false;
+
+      // 材料の充足率を計算（常備調味料も考慮）
       const availableCount = requiredIngredients.filter((ing) =>
-        inventoryNames.some((inv) => inv.includes(ing) || ing.includes(inv))
+        allAvailable.some(
+          (available) =>
+            available.includes(ing) || ing.includes(available),
+        ),
       ).length;
+
       return availableCount >= requiredIngredients.length * 0.6; // 60%以上の材料があれば提案
     });
   };
@@ -160,9 +218,25 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="mx-auto max-w-4xl p-4">
-        <header className="mb-6 text-center">
-          <h1 className="mb-2 text-4xl font-bold text-gray-800">💰 家計簿 & レシピ</h1>
-          <p className="text-gray-600">カメラで簡単記録</p>
+        <header className="mb-6">
+          <div className="flex items-center justify-between">
+            <div className="flex-1"></div>
+            <div className="flex-1 text-center">
+              <h1 className="mb-2 text-4xl font-bold text-gray-800">
+                💰 家計簿 & レシピ
+              </h1>
+              <p className="text-gray-600">カメラで簡単記録</p>
+            </div>
+            <div className="flex flex-1 justify-end">
+              <button
+                onClick={() => setShowSettings(true)}
+                className="rounded-lg p-2 text-gray-600 transition-all hover:bg-gray-200 active:scale-95"
+                aria-label="設定"
+              >
+                <Settings className="size-6" />
+              </button>
+            </div>
+          </div>
         </header>
 
         <Tabs.Root defaultValue="expenses" className="w-full">
@@ -325,13 +399,18 @@ export default function App() {
         />
       )}
 
-      {showAddRecipe && (
-        <AddRecipeForm
-          onAdd={(recipe) => {
-            addRecipe(recipe);
-            setShowAddRecipe(false);
+      {showSettings && (
+        <SettingsModal
+          settings={settings}
+          onSave={(newSettings) => {
+            setSettings(newSettings);
+            setShowSettings(false);
           }}
-          onClose={() => setShowAddRecipe(false)}
+          onClose={() => {
+            if (settings.isSetupComplete) {
+              setShowSettings(false);
+            }
+          }}
         />
       )}
     </div>
