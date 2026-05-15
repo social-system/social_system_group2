@@ -1,6 +1,7 @@
 import { useRef, useState, useEffect } from 'react';
 import { Camera, X, Check, Sparkles } from 'lucide-react';
 import type { Expense, InventoryItem } from '../App';
+import axios from 'axios'; // axios をインポート
 
 interface ExtractedData {
   expense?: Omit<Expense, 'id'>;
@@ -27,6 +28,14 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       stopCamera();
     };
   }, []);
+
+  // 撮り直すボタンなどで capturedImage が null に戻った時に、
+  // 再び video 要素にストリームをセットする
+  useEffect(() => {
+    if (!capturedImage && stream && videoRef.current) {
+      videoRef.current.srcObject = stream;
+    }
+  }, [capturedImage, stream]);
 
   const startCamera = async () => {
     try {
@@ -112,6 +121,62 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
     });
   };
 
+// analyzeImage関数（ロジック部分）のみを実機能に書き換え
+const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
+  try {
+    const res = await fetch(imageUrl);
+    const blob = await res.blob();
+    const formData = new FormData();
+    formData.append("file", blob, "capture.jpg");
+
+    try {
+      // 1. 通信を試みる
+      const response = await fetch("http://localhost:8000/receipt/items", {
+        method: "POST",
+        body: formData,
+      });
+
+      // 2. サーバーは応答したが、エラー（404, 500等）の場合
+      if (!response.ok) {
+        console.error("--- サーバー解析エラー発生 (ステータス: " + response.status + ") ---");
+        return getMockData(imageUrl, "サーバー出力エラー時のモックデータ");
+      }
+
+      // 3. 正常な場合：JSONを解析して返す
+      const data = await response.json();
+      return {
+        expense: data.expense || undefined,
+        inventoryItems: data.items || [],
+      };
+
+    } catch (networkError) {
+      // 4. そもそもサーバーが起動していない（接続拒否）場合
+      console.error("--- サーバー未起動または通信不能を検知 ---");
+      console.warn("検証のため、仮のデータを返却して続行します。");
+      return getMockData(imageUrl, "サーバー起動エラー時のモックデータ");
+    }
+
+  } catch (err) {
+    console.error("解析失敗:", err);
+    return {};
+  }
+};
+
+// ヘルパー関数：同じようなモックデータを何度も書かなくて済むように分離
+const getMockData = (imageUrl: string, description: string): ExtractedData => ({
+  expense: {
+    amount: 1280,
+    category: '食費（仮）',
+    description: description,
+    date: new Date(),
+    imageUrl,
+  },
+  inventoryItems: [
+    { name: 'デバッグ用牛乳', quantity: 1, unit: '本', category: '食品', imageUrl },
+    { name: 'デバッグ用卵', quantity: 10, unit: '個', category: '食品', imageUrl },
+  ],
+});
+
   const captureImage = async () => {
     if (videoRef.current && canvasRef.current) {
       const video = videoRef.current;
@@ -126,7 +191,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
         // 画像解析を開始
         setIsProcessing(true);
-        const data = await analyzeImage(imageUrl);
+        //const data = await analyzeImage(imageUrl);
+        const data = await analyzeImageCall(imageUrl);
         setExtractedData(data);
         setIsProcessing(false);
       }
@@ -139,6 +205,84 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       stopCamera();
     }
   };
+
+// 登録ボタンを押した時の処理（全データ一括送信版）
+  const handleConfirmCall = async () => {
+    if (capturedImage) {
+      try {
+        // 送信タスク（Promise）を溜める配列
+        const sendTasks: Promise<Response>[] = [];
+        
+        // 当日の日付（数値型: YYYYMMDD）
+        const todayDate = Number(new Date().toISOString().split('T')[0].replace(/-/g, ''));
+
+        // ==========================================
+        // 1. 支出データ（expense）があれば送信タスクに追加
+        // ==========================================
+        if (extractedData.expense) {
+          const expenseTask = fetch("http://localhost:8000/kakeibo/add", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              item: extractedData.expense.category || "レシート合計",
+              num: 1,
+              amount: Number(extractedData.expense.amount) || 0,
+              date: todayDate,
+              ingredients: 0 // 支出（食材以外）
+            }),
+          });
+          sendTasks.push(expenseTask);
+        }
+
+        // ==========================================
+        // 2. 在庫データ（inventoryItems）があればすべて送信タスクに追加
+        // ==========================================
+        if (extractedData.inventoryItems && extractedData.inventoryItems.length > 0) {
+          extractedData.inventoryItems.forEach((item) => {
+            const inventoryTask = fetch("http://localhost:8000/kakeibo/add", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                item: item.name || "在庫品",
+                num: Number(item.quantity) || 1,
+                amount: 0, // 在庫単体の金額は不明なため0
+                date: todayDate,
+                ingredients: 1 // 在庫（食材）
+              }),
+            });
+            sendTasks.push(inventoryTask);
+          });
+        }
+
+        // 送るべきデータが何もなかった場合
+        if (sendTasks.length === 0) {
+          alert("検出されたデータがありません。");
+          return;
+        }
+
+        // ==========================================
+        // 3. すべての送信処理を並列で実行
+        // ==========================================
+        const responses = await Promise.all(sendTasks);
+
+        // どこかでエラーが発生していないかチェック
+        const hasError = responses.some(res => !res.ok);
+        if (hasError) {
+          throw new Error("一部のデータの登録に失敗しました。");
+        }
+
+        alert(`家計簿に合計 ${sendTasks.length} 件のデータを追加しました！`);
+        
+        // 親コンポーネントへの通知とカメラの停止
+        onCapture(capturedImage, extractedData);
+        stopCamera();
+      } catch (err) {
+        console.error("家計簿への追加失敗:", err);
+        alert("家計簿への追加に失敗しました");
+      }
+    }
+  };
+
 
   const handleRetake = () => {
     setCapturedImage(null);
@@ -219,7 +363,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
                     撮り直す
                   </button>
                   <button
-                    onClick={handleConfirm}
+                    //onClick={handleConfirm}
+                    onClick={handleConfirmCall}
                     disabled={isProcessing}
                     className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-blue-500 px-6 py-3 font-medium text-white shadow-lg transition-all hover:bg-blue-600 disabled:opacity-50 active:scale-95"
                   >

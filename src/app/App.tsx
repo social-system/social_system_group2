@@ -141,13 +141,71 @@ export default function App() {
     }
   }, []);
 
+  // 日付オブジェクトから「YYYYMMDD」の数値を作成する共通ヘルパー
+  const formatToYmdNumber = (date: Date) => {
+    const targetDate = date instanceof Date ? date : new Date(date);
+    return Number(targetDate.toISOString().split('T')[0].replace(/-/g, ''));
+  };
+
   const addExpense = (expense: Omit<Expense, 'id'>) => {
     const newExpense = { ...expense, id: Date.now().toString() };
     setExpenses([newExpense, ...expenses]);
   };
 
+  // 手動家計簿追加（バックエンド送信を追加）
+  const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
+    try {
+      const response = await fetch("http://localhost:8000/kakeibo/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item: expense.category,
+          num: 1,
+          amount: Number(expense.amount),
+          date: formatToYmdNumber(expense.date || new Date()),
+          ingredients: 0 // 手動支出（食材以外）
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // フロントエンドの状態も更新
+      const newExpense = { ...expense, id: Date.now().toString() };
+      setExpenses([newExpense, ...expenses]);
+    } catch (err) {
+      console.error("家計簿データの送信に失敗しました:", err);
+      alert("サーバーへの保存に失敗しましたが、画面には反映されました。");
+      // フォールバックとしてフロントのみ更新したい場合はここに記述可能
+      const newExpense = { ...expense, id: Date.now().toString() };
+      setExpenses([newExpense, ...expenses]);
+    }
+  };
+
   const deleteExpense = (id: string) => {
     setExpenses(expenses.filter((e) => e.id !== id));
+  };
+
+  // 家計簿データ削除（バックエンド連携）
+  const deleteExpenseCall = async (id: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/kakeibo/delete/${id}`, {
+        method: "DELETE", // 削除リクエスト
+      });
+
+      if (!response.ok) {
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // バックエンド側での削除が成功したらフロント側も削除する
+      setExpenses(expenses.filter((e) => e.id !== id));
+    } catch (err) {
+      console.error("家計簿データの削除に失敗しました:", err);
+      alert("サーバーからのデータ削除に失敗しました。");
+      // エラーが起きても画面上は消したい場合は、下の行を生かしてください
+      // setExpenses(expenses.filter((e) => e.id !== id));
+    }
   };
 
   const addRecipe = (recipe: Omit<Recipe, 'id'>) => {
@@ -164,8 +222,58 @@ export default function App() {
     setInventory([newItem, ...inventory]);
   };
 
+
+  // 手動在庫追加（バックエンド送信を追加）
+  const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
+    try {
+      const response = await fetch("http://localhost:8000/kakeibo/add", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          item: item.name,
+          num: Number(item.quantity),
+          amount: 0, // 手動在庫追加時は単価が不明なため0
+          date: formatToYmdNumber(new Date()), // 本日の日付
+          ingredients: 1 // 手動在庫（食材）
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // フロントエンドの状態も更新
+      const newItem = { ...item, id: Date.now().toString() };
+      setInventory([newItem, ...inventory]);
+    } catch (err) {
+      console.error("在庫データの送信に失敗しました:", err);
+      alert("サーバーへの保存に失敗しましたが、画面には反映されました。");
+      const newItem = { ...item, id: Date.now().toString() };
+      setInventory([newItem, ...inventory]);
+    }
+  };
+
   const deleteInventoryItem = (id: string) => {
     setInventory(inventory.filter((i) => i.id !== id));
+  };
+
+  // 在庫データ削除（バックエンド連携）
+  const deleteInventoryItemCall = async (id: string) => {
+    try {
+      const response = await fetch(`http://localhost:8000/kakeibo/delete/${id}`, {
+        method: "DELETE", // 削除リクエスト
+      });
+
+      if (!response.ok) {
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // バックエンド側での削除が成功したらフロント側も削除する
+      setInventory(inventory.filter((i) => i.id !== id));
+    } catch (err) {
+      console.error("在庫データの削除に失敗しました:", err);
+      alert("サーバーからのデータ削除に失敗しました。");
+    }
   };
 
   const updateInventoryItem = (id: string, updates: Partial<InventoryItem>) => {
@@ -284,7 +392,8 @@ export default function App() {
                 </button>
               </div>
 
-              <ExpenseList expenses={expenses} onDelete={deleteExpense} />
+              <ExpenseList expenses={expenses} onDelete={deleteExpenseCall} />
+              
             </div>
           </Tabs.Content>
 
@@ -307,7 +416,8 @@ export default function App() {
 
               <InventoryList
                 inventory={inventory}
-                onDelete={deleteInventoryItem}
+                //onDelete={deleteInventoryItem}
+                onDelete={deleteInventoryItemCall}
                 onUpdate={updateInventoryItem}
               />
             </div>
@@ -369,10 +479,12 @@ export default function App() {
             setShowCamera(false);
             // 抽出されたデータを自動追加
             if (extractedData.expense) {
-              addExpense(extractedData.expense);
+              //addExpense(extractedData.expense);
+              addExpenseCall(extractedData.expense);
             }
             if (extractedData.inventoryItems) {
-              extractedData.inventoryItems.forEach((item) => addInventoryItem(item));
+              //extractedData.inventoryItems.forEach((item) => addInventoryItem(item));
+              extractedData.inventoryItems.forEach((item) => addInventoryItemCall(item));
             }
           }}
           onClose={() => setShowCamera(false)}
@@ -382,7 +494,8 @@ export default function App() {
       {showAddInventory && (
         <AddInventoryForm
           onAdd={(item) => {
-            addInventoryItem(item);
+            //addInventoryItem(item);
+            addInventoryItemCall(item); 
             setShowAddInventory(false);
           }}
           onClose={() => setShowAddInventory(false)}
@@ -392,7 +505,8 @@ export default function App() {
       {showAddExpense && (
         <AddExpenseForm
           onAdd={(expense) => {
-            addExpense(expense);
+            //addExpense(expense);
+            addExpenseCall(expense);
             setShowAddExpense(false);
           }}
           onClose={() => setShowAddExpense(false)}
