@@ -19,6 +19,11 @@ class FakeGeminiSettings:
     gemini_model = "test-gemini-model"
 
 
+class FakeOpenAISettings:
+    openai_api_key = None
+    openai_model = "test-openai-model"
+
+
 class FakeGeminiProvider:
     async def extract_receipt_text(
         self,
@@ -101,9 +106,9 @@ def test_real_provider_stubs_do_not_call_external_apis() -> None:
             )
         )
 
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ProviderConfigurationError):
         asyncio.run(
-            OpenAIStructuredProvider().normalize_receipt(
+            OpenAIStructuredProvider(settings=FakeOpenAISettings()).normalize_receipt(
                 gemini_result="fake receipt text"
             )
         )
