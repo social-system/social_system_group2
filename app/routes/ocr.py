@@ -3,7 +3,7 @@ from typing import NoReturn
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import ValidationError
 
-from app.providers.errors import ProviderError
+from app.providers.errors import ProviderConfigurationError, ProviderError
 from app.providers.gemini_provider import GeminiProvider
 from app.providers.openai_structured_provider import OpenAIStructuredProvider
 from app.schemas.ocr import ReceiptOcrResponse
@@ -68,6 +68,12 @@ async def extract_receipt(
             status_code=413,
             code="image_too_large",
             message="Uploaded image is too large.",
+        )
+    except ProviderConfigurationError:
+        raise_http_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="provider_not_configured",
+            message="OCR provider is not configured.",
         )
     except ProviderError:
         raise_http_error(

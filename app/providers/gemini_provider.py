@@ -4,7 +4,7 @@ import json
 from typing import Any, Protocol
 from urllib import parse, request
 
-from app.config import Settings, get_settings
+from app.config import get_settings
 from app.providers.errors import (
     ProviderConfigurationError,
     ProviderExecutionError,

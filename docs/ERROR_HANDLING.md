@@ -36,6 +36,8 @@ FastAPI validation errors may use FastAPI's standard 422 response unless a route
 | 413 | `image_too_large` | Uploaded image exceeds size limit |
 | 422 | `receipt_not_readable` | Image could not be interpreted as a receipt |
 | 422 | `structured_output_invalid` | Final structured data failed validation |
+| 502 | `provider_not_configured` | A live OCR provider was called without required configuration |
+| 502 | `ocr_provider_failed` | OCR provider failed |
 | 502 | `gemini_provider_failed` | Gemini provider failed |
 | 502 | `openai_provider_failed` | OpenAI provider failed |
 | 500 | `internal_server_error` | Unexpected server error |
