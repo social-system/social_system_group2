@@ -4,7 +4,7 @@
 
 Create the minimum FastAPI project foundation.
 
-This milestone must not implement OCR, image upload, Gemini, OpenAI, database calls, or `.env` files.
+This milestone must not implement OCR, image upload, Gemini, OpenAI, database calls, or file-based secret configuration.
 
 ## Scope
 
@@ -32,7 +32,7 @@ Response:
 ## Configuration rule
 
 Use `pydantic-settings` for configuration.
-Do not use `.env` files.
+Read configuration from OS environment variables only.
 Do not configure `env_file`.
 
 The app must start without API keys.
@@ -62,8 +62,7 @@ Do not implement:
 - OpenAI provider
 - OCR service logic
 - Database registration
-- `.env`
-- `.env.example`
+- Environment-file creation or templates
 
 ## Required tests
 

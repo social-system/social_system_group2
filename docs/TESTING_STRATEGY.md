@@ -104,4 +104,4 @@ uv run ruff check .
 Do not test actual Gemini image recognition.
 Do not test actual OpenAI Structured Outputs network calls.
 Do not test real receipt images containing personal information.
-Do not create or read `.env` files.
+Do not use file-based environment configuration.

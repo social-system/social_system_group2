@@ -66,7 +66,7 @@ Do not implement:
 - Gemini provider
 - OpenAI provider
 - Database calls
-- `.env` or `.env.example`
+- Environment-file creation or templates
 
 ## Required tests
 

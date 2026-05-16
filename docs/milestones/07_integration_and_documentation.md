@@ -24,7 +24,7 @@ The app must:
 - Pass tests without API keys
 - Use fake providers in tests
 - Return stable errors
-- Not create or read `.env` files
+- Use OS environment variables only for configuration
 
 ## README requirements
 
@@ -45,7 +45,6 @@ README must include:
 Include this idea clearly:
 
 ```text
-This project does not use .env files.
 For live manual testing, pass API keys through OS environment variables for the current shell or current command only.
 Do not commit API keys or store them in project files.
 ```

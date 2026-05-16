@@ -3,7 +3,7 @@
 ## Policy
 
 This project does not use `.env` files.
-Do not create `.env`, `.env.local`, or `.env.example`.
+Do not create environment-variable files or templates.
 
 Configuration is read from OS environment variables through `pydantic-settings`.
 

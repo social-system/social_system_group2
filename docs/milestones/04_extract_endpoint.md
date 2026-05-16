@@ -46,7 +46,7 @@ Response:
 Endpoint tests must inject fake service or fake providers.
 
 Do not require real API keys.
-Do not require `.env` files.
+Do not require file-based environment configuration.
 
 ## Forbidden work
 
@@ -56,7 +56,7 @@ Do not implement:
 - Live OpenAI API call
 - DB registration
 - Image persistence
-- `.env` or `.env.example`
+- Environment-file creation or templates
 
 ## Required tests
 

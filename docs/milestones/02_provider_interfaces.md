@@ -60,7 +60,7 @@ Do not implement:
 
 - Live Gemini API call
 - Live OpenAI API call
-- `.env` files
+- Environment-file handling
 - Database calls
 
 ## Required tests

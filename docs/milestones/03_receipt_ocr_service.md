@@ -53,7 +53,7 @@ Do not implement:
 - Real Gemini API call
 - Real OpenAI API call
 - DB registration
-- `.env` files
+- Environment-file handling
 
 ## Required tests
 
