@@ -14,6 +14,11 @@ from app.providers.gemini_provider import GeminiProvider
 from app.providers.openai_structured_provider import OpenAIStructuredProvider
 
 
+class FakeGeminiSettings:
+    gemini_api_key = None
+    gemini_model = "test-gemini-model"
+
+
 class FakeGeminiProvider:
     async def extract_receipt_text(
         self,
@@ -88,9 +93,9 @@ def test_provider_exceptions_can_be_imported_and_handled(
 
 
 def test_real_provider_stubs_do_not_call_external_apis() -> None:
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ProviderConfigurationError):
         asyncio.run(
-            GeminiProvider().extract_receipt_text(
+            GeminiProvider(settings=FakeGeminiSettings()).extract_receipt_text(
                 image_bytes=b"receipt",
                 mime_type="image/jpeg",
             )
