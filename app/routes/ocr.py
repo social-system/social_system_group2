@@ -3,7 +3,12 @@ from typing import NoReturn
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import ValidationError
 
-from app.providers.errors import ProviderConfigurationError, ProviderError
+from app.providers.errors import (
+    GeminiProviderError,
+    OpenAIProviderError,
+    ProviderConfigurationError,
+    ProviderError,
+)
 from app.providers.gemini_provider import GeminiProvider
 from app.providers.openai_structured_provider import OpenAIStructuredProvider
 from app.schemas.ocr import ReceiptOcrResponse
@@ -74,6 +79,18 @@ async def extract_receipt(
             status_code=status.HTTP_502_BAD_GATEWAY,
             code="provider_not_configured",
             message="OCR provider is not configured.",
+        )
+    except GeminiProviderError:
+        raise_http_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="gemini_provider_failed",
+            message="Gemini provider failed.",
+        )
+    except OpenAIProviderError:
+        raise_http_error(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            code="openai_provider_failed",
+            message="OpenAI provider failed.",
         )
     except ProviderError:
         raise_http_error(

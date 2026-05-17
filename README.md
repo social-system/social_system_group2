@@ -49,7 +49,7 @@ uv sync
 | `GEMINI_API_KEY` | no | yes | none |
 | `GEMINI_MODEL` | no | no | `gemini-2.5-flash` |
 | `OPENAI_API_KEY` | no | yes | none |
-| `OPENAI_MODEL` | no | no | `gpt-5.1-mini` |
+| `OPENAI_MODEL` | no | no | `gpt-5.4-mini` |
 | `MAX_IMAGE_BYTES` | no | no | `10485760` |
 | `ALLOWED_IMAGE_MIME_TYPES` | no | no | `image/jpeg,image/png,image/webp` |
 

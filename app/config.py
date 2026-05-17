@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     openai_api_key: str | None = None
-    openai_model: str = "gpt-5.1-mini"
+    openai_model: str = "gpt-5.4-mini"
     max_image_bytes: int = 10_485_760
     allowed_image_mime_types: list[str] = Field(
         default_factory=lambda: ["image/jpeg", "image/png", "image/webp"]

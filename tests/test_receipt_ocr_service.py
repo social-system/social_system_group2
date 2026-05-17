@@ -4,7 +4,12 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from app.providers.errors import ProviderExecutionError
+from app.providers.errors import (
+    GeminiProviderError,
+    OpenAIProviderError,
+    ProviderConfigurationError,
+    ProviderExecutionError,
+)
 from app.schemas.ocr import ReceiptOcrResponse
 from app.services.receipt_ocr_service import (
     TOTAL_MISMATCH_WARNING,
@@ -39,6 +44,9 @@ class FakeGeminiProvider:
 
 
 class FailingGeminiProvider:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or ProviderExecutionError("gemini failed")
+
     async def extract_receipt_text(
         self,
         *,
@@ -46,7 +54,7 @@ class FailingGeminiProvider:
         mime_type: str,
         filename: str | None = None,
     ) -> str:
-        raise ProviderExecutionError("gemini failed")
+        raise self.error
 
 
 class FakeOpenAIProvider:
@@ -64,12 +72,15 @@ class FakeOpenAIProvider:
 
 
 class FailingOpenAIProvider:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error or ProviderExecutionError("openai failed")
+
     async def normalize_receipt(
         self,
         *,
         gemini_result: str,
     ) -> dict[str, Any]:
-        raise ProviderExecutionError("openai failed")
+        raise self.error
 
 
 def valid_structured_response() -> dict[str, Any]:
@@ -225,7 +236,7 @@ def test_image_validation_error_propagates() -> None:
 def test_gemini_provider_failure_propagates() -> None:
     service = make_service(gemini_provider=FailingGeminiProvider())
 
-    with pytest.raises(ProviderExecutionError):
+    with pytest.raises(GeminiProviderError):
         asyncio.run(
             service.extract_receipt(image_bytes=b"receipt-image", mime_type="image/jpeg")
         )
@@ -234,7 +245,20 @@ def test_gemini_provider_failure_propagates() -> None:
 def test_openai_provider_failure_propagates() -> None:
     service = make_service(openai_provider=FailingOpenAIProvider())
 
-    with pytest.raises(ProviderExecutionError):
+    with pytest.raises(OpenAIProviderError):
+        asyncio.run(
+            service.extract_receipt(image_bytes=b"receipt-image", mime_type="image/jpeg")
+        )
+
+
+def test_provider_configuration_error_is_not_wrapped() -> None:
+    service = make_service(
+        gemini_provider=FailingGeminiProvider(
+            ProviderConfigurationError("not configured")
+        )
+    )
+
+    with pytest.raises(ProviderConfigurationError):
         asyncio.run(
             service.extract_receipt(image_bytes=b"receipt-image", mime_type="image/jpeg")
         )

@@ -4,7 +4,12 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from app.main import app
-from app.providers.errors import ProviderConfigurationError, ProviderExecutionError
+from app.providers.errors import (
+    GeminiProviderError,
+    OpenAIProviderError,
+    ProviderConfigurationError,
+    ProviderExecutionError,
+)
 from app.routes.ocr import get_receipt_ocr_service
 from app.schemas.ocr import ReceiptOcrResponse
 from app.services.receipt_ocr_service import TOTAL_MISMATCH_WARNING
@@ -119,6 +124,24 @@ def test_provider_failure_returns_502() -> None:
 
     assert response.status_code == 502
     assert response.json()["detail"]["code"] == "ocr_provider_failed"
+
+
+def test_gemini_provider_failure_returns_502() -> None:
+    response = post_extract_with_service(
+        RaisingReceiptOcrService(GeminiProviderError("gemini failed"))
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "gemini_provider_failed"
+
+
+def test_openai_provider_failure_returns_502() -> None:
+    response = post_extract_with_service(
+        RaisingReceiptOcrService(OpenAIProviderError("openai failed"))
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "openai_provider_failed"
 
 
 def test_provider_configuration_error_returns_502() -> None:

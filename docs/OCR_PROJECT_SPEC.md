@@ -92,7 +92,7 @@ Actual provider execution should fail clearly if required keys are missing.
 | Name | Default | Meaning |
 |---|---|---|
 | `GEMINI_MODEL` | `gemini-2.5-flash` | Gemini model name |
-| `OPENAI_MODEL` | `gpt-5.1-mini` | OpenAI model name |
+| `OPENAI_MODEL` | `gpt-5.4-mini` | OpenAI model name |
 | `MAX_IMAGE_BYTES` | `10485760` | 10MB upload limit |
 | `ALLOWED_IMAGE_MIME_TYPES` | `image/jpeg,image/png,image/webp` | Allowed image MIME types |
 

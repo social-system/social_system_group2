@@ -4,6 +4,8 @@ from typing import Any
 import pytest
 
 from app.providers import (
+    GeminiProviderError,
+    OpenAIProviderError,
     GeminiProviderProtocol,
     OpenAIStructuredProviderProtocol,
     ProviderConfigurationError,
@@ -85,6 +87,8 @@ def test_fake_openai_provider_can_return_fake_structured_dict() -> None:
 @pytest.mark.parametrize(
     "error_type",
     [
+        GeminiProviderError,
+        OpenAIProviderError,
         ProviderConfigurationError,
         ProviderExecutionError,
         ProviderInvalidResponseError,

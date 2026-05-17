@@ -17,7 +17,7 @@ Live API keys are used only by the human developer during manual verification.
 | `GEMINI_API_KEY` | no | yes | none | Gemini API key |
 | `GEMINI_MODEL` | no | no | `gemini-2.5-flash` | Gemini model |
 | `OPENAI_API_KEY` | no | yes | none | OpenAI API key |
-| `OPENAI_MODEL` | no | no | `gpt-5.1-mini` | OpenAI model |
+| `OPENAI_MODEL` | no | no | `gpt-5.4-mini` | OpenAI model |
 | `MAX_IMAGE_BYTES` | no | no | `10485760` | Maximum image upload size |
 | `ALLOWED_IMAGE_MIME_TYPES` | no | no | `image/jpeg,image/png,image/webp` | Allowed upload MIME types |
 
@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     openai_api_key: str | None = None
-    openai_model: str = "gpt-5.1-mini"
+    openai_model: str = "gpt-5.4-mini"
     max_image_bytes: int = 10_485_760
     allowed_image_mime_types: str = "image/jpeg,image/png,image/webp"
 

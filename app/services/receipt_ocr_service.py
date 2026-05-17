@@ -2,6 +2,12 @@ from app.providers.base import (
     GeminiProviderProtocol,
     OpenAIStructuredProviderProtocol,
 )
+from app.providers.errors import (
+    GeminiProviderError,
+    OpenAIProviderError,
+    ProviderConfigurationError,
+    ProviderError,
+)
 from app.schemas.ocr import ReceiptOcrResponse
 from app.utils.image_validation import (
     ImageValidationSettings,
@@ -35,14 +41,26 @@ class ReceiptOcrService:
             mime_type=mime_type,
             settings=self._image_validation_settings,
         )
-        gemini_result = await self._gemini_provider.extract_receipt_text(
-            image_bytes=image_bytes,
-            mime_type=validated_image.mime_type,
-            filename=filename,
-        )
-        structured_result = await self._openai_provider.normalize_receipt(
-            gemini_result=gemini_result,
-        )
+        try:
+            gemini_result = await self._gemini_provider.extract_receipt_text(
+                image_bytes=image_bytes,
+                mime_type=validated_image.mime_type,
+                filename=filename,
+            )
+        except ProviderConfigurationError:
+            raise
+        except ProviderError as exc:
+            raise GeminiProviderError("Gemini provider failed.") from exc
+
+        try:
+            structured_result = await self._openai_provider.normalize_receipt(
+                gemini_result=gemini_result,
+            )
+        except ProviderConfigurationError:
+            raise
+        except ProviderError as exc:
+            raise OpenAIProviderError("OpenAI provider failed.") from exc
+
         response = ReceiptOcrResponse.model_validate(structured_result)
 
         return self._add_total_mismatch_warning(response)

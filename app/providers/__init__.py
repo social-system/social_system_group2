@@ -3,6 +3,8 @@ from app.providers.base import (
     OpenAIStructuredProviderProtocol,
 )
 from app.providers.errors import (
+    GeminiProviderError,
+    OpenAIProviderError,
     ProviderConfigurationError,
     ProviderError,
     ProviderExecutionError,
@@ -12,6 +14,8 @@ from app.providers.errors import (
 __all__ = [
     "GeminiProviderProtocol",
     "OpenAIStructuredProviderProtocol",
+    "GeminiProviderError",
+    "OpenAIProviderError",
     "ProviderConfigurationError",
     "ProviderError",
     "ProviderExecutionError",

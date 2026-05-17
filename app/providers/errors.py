@@ -12,3 +12,11 @@ class ProviderExecutionError(ProviderError):
 
 class ProviderInvalidResponseError(ProviderError):
     """Raised when provider output cannot be normalized or validated."""
+
+
+class GeminiProviderError(ProviderError):
+    """Raised when Gemini fails during receipt extraction."""
+
+
+class OpenAIProviderError(ProviderError):
+    """Raised when OpenAI fails during receipt normalization."""
