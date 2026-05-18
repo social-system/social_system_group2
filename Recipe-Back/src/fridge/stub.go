@@ -2,6 +2,7 @@ package fridge
 
 import (
 	"context"
+	"log/slog"
 	"time"
 )
 
@@ -14,6 +15,11 @@ func NewStubClient() Client {
 
 func (s *stubClient) GetInventory(_ context.Context) (Inventory, error) {
 	return stubInventory(), nil
+}
+
+func (s *stubClient) PostMovement(_ context.Context, req MovementRequest) error {
+	slog.Info("stub: PostMovement called", "product_id", req.ProductID, "quantity", req.Quantity, "unit", req.Unit)
+	return nil
 }
 
 func stubInventory() Inventory {

@@ -39,6 +39,10 @@ type Ingredient struct {
 	Amount string `json:"amount"`
 	// 冷蔵庫にある食材かどうか
 	IsInFridge bool `json:"isInFridge"`
+	// 冷蔵庫食材のproduct_id（isInFridge=trueかつ特定できた場合のみ）
+	ProductID int `json:"productId,omitempty"`
+	// 冷蔵庫食材の単位（isInFridge=trueかつ特定できた場合のみ）
+	Unit string `json:"unit,omitempty"`
 }
 
 // Step は調理手順の1ステップ
@@ -57,6 +61,24 @@ type Preferences struct {
 	Condiments []string `json:"condiments"`
 	// 個人の趣向・メモ（例: "辛いものが好き、魚は苦手"）
 	PersonalNotes string `json:"personalNotes"`
+}
+
+// AcceptRecipeRequest は POST /api/v1/recipes/accept のリクエストボディ
+// @Description レシピ受け入れリクエスト
+type AcceptRecipeRequest struct {
+	// レシピ名
+	RecipeName string `json:"recipeName"`
+	// 材料リスト（suggestレスポンスのingredientsをそのまま渡す）
+	Ingredients []Ingredient `json:"ingredients"`
+}
+
+// AcceptRecipeResponse は POST /api/v1/recipes/accept のレスポンスボディ
+// @Description レシピ受け入れレスポンス
+type AcceptRecipeResponse struct {
+	// 在庫移動として記録した食材数
+	MovementsCreated int `json:"movementsCreated"`
+	// product_id 不明などでスキップした食材名
+	Skipped []string `json:"skipped,omitempty"`
 }
 
 // ErrorResponse は標準エラーレスポンス

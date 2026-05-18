@@ -1,6 +1,7 @@
 package fridge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 // Client は冷蔵庫在庫管理システムとのインターフェース
 type Client interface {
 	GetInventory(ctx context.Context) (Inventory, error)
+	PostMovement(ctx context.Context, req MovementRequest) error
 }
 
 type httpClient struct {
@@ -57,4 +59,30 @@ func (c *httpClient) GetInventory(ctx context.Context) (Inventory, error) {
 	}
 	inventory.FetchedAt = time.Now()
 	return inventory, nil
+}
+
+// PostMovement は冷蔵庫システムに在庫移動（消費）を記録する。
+func (c *httpClient) PostMovement(ctx context.Context, req MovementRequest) error {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("movement request marshal failed: %w", err)
+	}
+
+	url := c.baseURL + "/inventory/movements"
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("movement request creation failed: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("movement request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("inventory movements returned status %d", resp.StatusCode)
+	}
+	return nil
 }

@@ -22,6 +22,7 @@ func NewRouter(recipeHandler *RecipeHandler, prefsHandler *PreferencesHandler) h
 	r.Route("/api/v1", func(r chi.Router) {
 		r.Get("/health", HealthHandler)
 		r.Post("/recipes/suggest", recipeHandler.SuggestRecipes)
+		r.Post("/recipes/accept", recipeHandler.AcceptRecipe)
 		r.Get("/preferences", prefsHandler.GetPreferences)
 		r.Put("/preferences", prefsHandler.UpdatePreferences)
 	})

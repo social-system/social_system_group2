@@ -53,6 +53,7 @@ go build -o recipe-back ./src/...
 |---|---|---|
 | `GET` | `/api/v1/health` | ヘルスチェック |
 | `POST` | `/api/v1/recipes/suggest` | レシピ提案 |
+| `POST` | `/api/v1/recipes/accept` | レシピ受け入れ・在庫消費 |
 | `GET` | `/api/v1/preferences` | ユーザー設定取得 |
 | `PUT` | `/api/v1/preferences` | ユーザー設定更新 |
 
@@ -106,8 +107,8 @@ curl -X POST http://localhost:8080/api/v1/recipes/suggest \
       "description": "冷蔵庫の食材で手軽に作れる和風炒め物。ご飯が進む一品。",
       "matchScore": "高",
       "ingredients": [
-        { "name": "鶏むね肉", "amount": "200g", "isInFridge": true },
-        { "name": "小松菜", "amount": "1束", "isInFridge": true },
+        { "name": "鶏むね肉", "amount": "200g", "isInFridge": true, "productId": 10, "unit": "g" },
+        { "name": "小松菜", "amount": "1束", "isInFridge": true, "productId": 11, "unit": "束" },
         { "name": "醤油", "amount": "大さじ2", "isInFridge": false },
         { "name": "みりん", "amount": "大さじ1", "isInFridge": false }
       ],
@@ -125,6 +126,8 @@ curl -X POST http://localhost:8080/api/v1/recipes/suggest \
 |---|---|
 | `matchScore` | 冷蔵庫食材との一致度: `"高"` / `"中"` / `"低"` |
 | `isInFridge` | `true` = 冷蔵庫にある食材 |
+| `productId` | 冷蔵庫食材の product_id（`isInFridge=true` かつ冷蔵庫システムと名前が一致した場合のみ付与） |
+| `unit` | 冷蔵庫食材の単位（`productId` が付与された場合のみ）。`POST /api/v1/recipes/accept` に渡す際に使用する |
 
 ### エラーレスポンス
 
@@ -145,6 +148,96 @@ curl -X POST http://localhost:8080/api/v1/recipes/suggest \
 **502 AI_ERROR** — AI APIエラー:
 ```json
 { "error": "Failed to get recipe suggestions from AI", "code": "AI_ERROR", "details": "..." }
+```
+
+---
+
+## POST /api/v1/recipes/accept
+
+`POST /api/v1/recipes/suggest` で得たレシピをユーザーが選択した際に呼び出します。`isInFridge=true` かつ `productId > 0` な食材について、冷蔵庫システムの `POST /inventory/movements` を呼び出して在庫を自動消費します。常備調味料（`isInFridge=false` または `productId=0`）はスキップされます。
+
+### リクエスト
+
+```bash
+curl -X POST http://localhost:8080/api/v1/recipes/accept \
+  -H "Content-Type: application/json" \
+  -d '{
+    "recipeName": "鶏むね肉と小松菜の和風炒め",
+    "ingredients": [
+      { "name": "鶏むね肉", "amount": "200g", "isInFridge": true, "productId": 10, "unit": "g" },
+      { "name": "小松菜", "amount": "1束", "isInFridge": true, "productId": 11, "unit": "束" },
+      { "name": "醤油", "amount": "大さじ2", "isInFridge": false },
+      { "name": "みりん", "amount": "大さじ1", "isInFridge": false }
+    ]
+  }'
+```
+
+> **推奨**: `suggest` のレスポンスに含まれる `ingredients` をそのままリクエストボディに渡してください。`productId` と `unit` が正しく設定されています。
+
+| フィールド | 型 | 必須 | 説明 |
+|---|---|---|---|
+| `recipeName` | string | 任意 | 在庫移動の `reason` フィールドに使用（例: `"レシピで使用: 鶏むね肉と小松菜の和風炒め"`） |
+| `ingredients` | Ingredient[] | 必須 | suggest レスポンスの `ingredients` をそのまま渡す |
+
+### レスポンス 200
+
+```json
+{
+  "movementsCreated": 2,
+  "skipped": []
+}
+```
+
+| フィールド | 説明 |
+|---|---|
+| `movementsCreated` | 在庫移動の記録に成功した食材数 |
+| `skipped` | 冷蔵庫システムへの記録に失敗した食材名のリスト（ベストエフォート: 他の食材の処理は継続） |
+
+### 冷蔵庫システムへ送信されるリクエスト例
+
+各対象食材について以下の形式で `POST {FRIDGE_API_BASE_URL}/inventory/movements` を呼び出します:
+
+```json
+{
+  "product_id": 10,
+  "movement_type": "consume",
+  "quantity": "200.00",
+  "unit": "g",
+  "batch_id": null,
+  "location_id": null,
+  "reason": "レシピで使用: 鶏むね肉と小松菜の和風炒め",
+  "occurred_at": "2026-05-18T12:00:00",
+  "idempotency_key": "recipe:consume:10:1747566000000000000"
+}
+```
+
+**quantity の解析ルール** (`amount` フィールドから自動変換):
+
+| `amount` 例 | `quantity` | `unit`（フォールバック） |
+|---|---|---|
+| `"200g"` | `"200.00"` | `"g"` |
+| `"2個"` | `"2.00"` | `"個"` |
+| `"大さじ2"` | `"2.00"` | `"大さじ"` |
+| `"小さじ1/2"` | `"0.50"` | `"小さじ"` |
+| `"2~3切れ"` | `"2.00"` | `ingredient.unit` を使用 |
+| `"適量"` / `"少々"` | `"1.00"` | `ingredient.unit` を使用 |
+
+> `unit` は `ingredient.unit`（冷蔵庫食材由来）を優先して使用します。`ingredient.unit` が空の場合のみ `amount` から解析した unit を使用します。
+
+### エラーレスポンス
+
+**400 BAD_REQUEST** — リクエストボディが不正なJSON:
+```json
+{ "error": "Request body is invalid JSON", "code": "BAD_REQUEST" }
+```
+
+**422 VALIDATION_ERROR** — `ingredients` が空:
+```json
+{
+  "error": "Validation failed",
+  "code": "VALIDATION_ERROR",
+  "details": "ingredients must not be empty"
+}
 ```
 
 ---
@@ -211,25 +304,53 @@ curl -X PUT http://localhost:8080/api/v1/preferences \
 
 ## 冷蔵庫システム連携
 
-冷蔵庫在庫管理システムが稼働していない場合、Recipe-Backはエラーにならず空の食材リストでレシピを提案します。
+冷蔵庫在庫管理システムが稼働していない場合、Recipe-Backはエラーにならずスタブデータでレシピを提案します。
 
-冷蔵庫システムが実装された際は、以下のエンドポイントを提供してください:
+冷蔵庫システムは以下の2つのエンドポイントを提供してください:
 
-```
-GET {FRIDGE_API_BASE_URL}/inventory
-```
+### GET {FRIDGE_API_BASE_URL}/inventory/batches
+
+在庫一覧の取得。`POST /api/v1/recipes/suggest` 時に呼び出されます。
 
 **期待するレスポンス形式:**
 ```json
 {
   "items": [
     {
-      "name": "鶏むね肉",
-      "amount": "300g",
-      "expiryDate": "2026-04-25T00:00:00Z",
-      "category": "肉"
+      "batch_id": 1,
+      "product_id": 10,
+      "product_name": "鶏むね肉",
+      "initial_quantity": "300.00",
+      "current_quantity": "300.00",
+      "unit": "g",
+      "location_id": 1,
+      "location_name": "冷蔵",
+      "purchased_at": "2026-05-10",
+      "expires_at": "2026-05-17",
+      "status": "active",
+      "receipt_item_id": 1
     }
-  ],
-  "fetchedAt": "2026-04-21T10:00:00Z"
+  ]
 }
 ```
+
+### POST {FRIDGE_API_BASE_URL}/inventory/movements
+
+在庫消費の記録。`POST /api/v1/recipes/accept` 時に食材ごとに呼び出されます。
+
+**リクエスト形式:**
+```json
+{
+  "product_id": 10,
+  "movement_type": "consume",
+  "quantity": "200.00",
+  "unit": "g",
+  "batch_id": null,
+  "location_id": null,
+  "reason": "レシピで使用: 鶏むね肉と小松菜の和風炒め",
+  "occurred_at": "2026-05-18T12:00:00",
+  "idempotency_key": "recipe:consume:10:1747566000000000000"
+}
+```
+
+2xx レスポンスを返せば成功と判定します。

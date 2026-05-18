@@ -2,8 +2,13 @@ package api
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 	"unicode/utf8"
 
 	"github.com/social-system-group2/recipe-back/src/ai"
@@ -78,7 +83,7 @@ func (h *RecipeHandler) SuggestRecipes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, SuggestRecipesResponse{Recipes: convertRecipes(aiRecipes)})
+	writeJSON(w, http.StatusOK, SuggestRecipesResponse{Recipes: convertRecipes(aiRecipes, inventory)})
 }
 
 // PreferencesHandler は GET/PUT /api/v1/preferences を処理する
@@ -170,16 +175,131 @@ func HealthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func convertRecipes(aiRecipes []ai.Recipe) []Recipe {
+// AcceptRecipe はレシピ受け入れ時に冷蔵庫の在庫を消費する
+// @Summary レシピ受け入れ
+// @Description 受け入れたレシピの冷蔵庫食材を POST /inventory/movements で消費記録する
+// @Accept json
+// @Produce json
+// @Param request body AcceptRecipeRequest true "受け入れるレシピ情報"
+// @Success 200 {object} AcceptRecipeResponse
+// @Failure 400 {object} ErrorResponse
+// @Failure 422 {object} ErrorResponse
+// @Router /api/v1/recipes/accept [post]
+func (h *RecipeHandler) AcceptRecipe(w http.ResponseWriter, r *http.Request) {
+	var req AcceptRecipeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "BAD_REQUEST", "Request body is invalid JSON", "")
+		return
+	}
+	if len(req.Ingredients) == 0 {
+		writeError(w, http.StatusUnprocessableEntity, "VALIDATION_ERROR", "Validation failed", "ingredients must not be empty")
+		return
+	}
+
+	var movementsCreated int
+	var skipped []string
+
+	now := time.Now()
+	for _, ing := range req.Ingredients {
+		if !ing.IsInFridge || ing.ProductID == 0 {
+			continue
+		}
+
+		quantity, parsedUnit := parseAmount(ing.Amount)
+		unit := ing.Unit
+		if unit == "" {
+			unit = parsedUnit
+		}
+
+		movReq := fridge.MovementRequest{
+			ProductID:      ing.ProductID,
+			MovementType:   "consume",
+			Quantity:       quantity,
+			Unit:           unit,
+			BatchID:        nil,
+			LocationID:     nil,
+			Reason:         fmt.Sprintf("レシピで使用: %s", req.RecipeName),
+			OccurredAt:     now.Format("2006-01-02T15:04:05"),
+			IdempotencyKey: fmt.Sprintf("recipe:consume:%d:%d", ing.ProductID, now.UnixNano()),
+		}
+
+		if err := h.fridgeClient.PostMovement(r.Context(), movReq); err != nil {
+			slog.Warn("inventory movement failed", "product_id", ing.ProductID, "name", ing.Name, "error", err)
+			skipped = append(skipped, ing.Name)
+			continue
+		}
+		movementsCreated++
+	}
+
+	writeJSON(w, http.StatusOK, AcceptRecipeResponse{
+		MovementsCreated: movementsCreated,
+		Skipped:          skipped,
+	})
+}
+
+var numericRe = regexp.MustCompile(`^(\d+)(?:/(\d+))?`)
+
+// parseAmount は "200g", "2個", "大さじ2", "1/2個", "適量" などを (quantity, unit) に変換する。
+// 数値が抽出できない場合は "1.00" を返す。
+func parseAmount(amount string) (quantity string, unit string) {
+	amount = strings.TrimSpace(amount)
+
+	// 前置ユニット（大さじ・小さじ）を先に抽出
+	for _, prefix := range []string{"大さじ", "小さじ"} {
+		if strings.HasPrefix(amount, prefix) {
+			rest := strings.TrimPrefix(amount, prefix)
+			q, _ := parseAmount(rest)
+			return q, prefix
+		}
+	}
+
+	m := numericRe.FindStringSubmatch(amount)
+	if m == nil {
+		return "1.00", ""
+	}
+
+	numerator, _ := strconv.ParseFloat(m[1], 64)
+	val := numerator
+	if m[2] != "" {
+		denominator, _ := strconv.ParseFloat(m[2], 64)
+		if denominator != 0 {
+			val = numerator / denominator
+		}
+	}
+
+	// 数値部分の後ろの文字列をユニットとする（"~N" などは除去）
+	after := amount[len(m[0]):]
+	if idx := strings.IndexAny(after, "~〜"); idx >= 0 {
+		after = ""
+	}
+	unit = strings.TrimSpace(after)
+
+	return fmt.Sprintf("%.2f", val), unit
+}
+
+func convertRecipes(aiRecipes []ai.Recipe, inventory fridge.Inventory) []Recipe {
+	// product_name → fridge.Item のマップを構築
+	itemByName := make(map[string]fridge.Item, len(inventory.Items))
+	for _, item := range inventory.Items {
+		itemByName[item.ProductName] = item
+	}
+
 	result := make([]Recipe, 0, len(aiRecipes))
 	for _, r := range aiRecipes {
 		ingredients := make([]Ingredient, 0, len(r.Ingredients))
 		for _, ing := range r.Ingredients {
-			ingredients = append(ingredients, Ingredient{
+			apiIng := Ingredient{
 				Name:       ing.Name,
 				Amount:     ing.Amount,
 				IsInFridge: ing.IsInFridge,
-			})
+			}
+			if ing.IsInFridge {
+				if item, ok := itemByName[ing.Name]; ok {
+					apiIng.ProductID = item.ProductID
+					apiIng.Unit = item.Unit
+				}
+			}
+			ingredients = append(ingredients, apiIng)
 		}
 		steps := make([]Step, 0, len(r.Steps))
 		for _, s := range r.Steps {

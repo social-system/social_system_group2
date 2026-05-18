@@ -23,3 +23,16 @@ type Inventory struct {
 	Items     []Item    `json:"items"`
 	FetchedAt time.Time `json:"fetchedAt"`
 }
+
+// MovementRequest は POST /inventory/movements のリクエストボディ
+type MovementRequest struct {
+	ProductID      int    `json:"product_id"`
+	MovementType   string `json:"movement_type"`
+	Quantity       string `json:"quantity"`
+	Unit           string `json:"unit"`
+	BatchID        *int   `json:"batch_id"`
+	LocationID     *int   `json:"location_id"`
+	Reason         string `json:"reason"`
+	OccurredAt     string `json:"occurred_at"`
+	IdempotencyKey string `json:"idempotency_key"`
+}
