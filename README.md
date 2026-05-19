@@ -69,6 +69,24 @@ API キーなしで起動できます。
 uv run uvicorn app.main:app --reload
 ```
 
+実 provider を使って動作確認する場合は、API キーを OS 環境変数として現在のコマンドだけに渡して起動します。実 API キーは README、`.env`、ログ、コミット対象ファイルに保存しないでください。
+
+```bash
+OPENAI_API_KEY="<set-by-human>" \
+GEMINI_API_KEY="<set-by-human>" \
+uv run uvicorn app.main:app --reload
+```
+
+モデルを明示する場合も同じコマンド内で指定できます。
+
+```bash
+OPENAI_API_KEY="<set-by-human>" \
+GEMINI_API_KEY="<set-by-human>" \
+OPENAI_MODEL="gpt-5.4-mini" \
+GEMINI_MODEL="gemini-2.5-flash" \
+uv run uvicorn app.main:app --reload
+```
+
 起動後の既定 URL:
 
 ```text
