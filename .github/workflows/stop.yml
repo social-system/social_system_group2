@@ -1,0 +1,34 @@
+name: Stop Container App
+
+on:
+  workflow_dispatch:
+
+jobs:
+  stop:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Deactivate all revisions
+        run: |
+          revisions=$(az containerapp revision list \
+            --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+            --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+            --query '[?properties.active==`true`].name' -o tsv)
+
+          if [ -z "$revisions" ]; then
+            echo "No active revisions found."
+            exit 0
+          fi
+
+          for rev in $revisions; do
+            az containerapp revision deactivate \
+              --name ${{ secrets.AZURE_CONTAINER_APP_NAME }} \
+              --resource-group ${{ secrets.AZURE_RESOURCE_GROUP }} \
+              --revision "$rev"
+            echo "Deactivated: $rev"
+          done
