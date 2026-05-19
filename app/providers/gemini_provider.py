@@ -20,7 +20,8 @@ Return intermediate text or JSON-like text for a later normalization step; this 
 is not trusted final JSON.
 
 Capture these candidates when visible:
-- store name
+- store name from the receipt header, such as a store, branch, supermarket, or
+  convenience store name
 - purchase date
 - total amount paid
 - item rows
@@ -28,6 +29,12 @@ Capture these candidates when visible:
 - unit prices
 - line totals
 - warnings for unclear, ignored, or ambiguous lines
+
+For store name extraction:
+- Do not use an address, phone number, or company name alone as the store name.
+- If the store name is hard to distinguish from company or contact information,
+  return null/unknown for the store name.
+- Do not invent or infer a store name.
 
 Do not include product IDs, category IDs, database IDs, inventory updates, or recipe
 recommendations.

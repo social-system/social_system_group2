@@ -73,6 +73,13 @@ def test_provider_builds_request_using_image_bytes_and_mime_type() -> None:
     assert client.received_mime_type == "image/jpeg"
     assert client.received_prompt == GEMINI_RECEIPT_PROMPT
     assert "store name" in client.received_prompt
+    assert "receipt header" in client.received_prompt
+    assert "branch" in client.received_prompt
+    assert "supermarket" in client.received_prompt
+    assert "Do not use an address, phone number, or company name alone" in (
+        client.received_prompt
+    )
+    assert "Do not invent or infer a store name" in client.received_prompt
     assert "total amount" in client.received_prompt
     assert "line totals" in client.received_prompt
 

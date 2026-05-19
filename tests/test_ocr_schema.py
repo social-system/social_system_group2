@@ -37,6 +37,19 @@ def test_receipt_ocr_response_accepts_null_fields() -> None:
     assert response.warnings == []
 
 
+def test_receipt_ocr_response_accepts_store_name() -> None:
+    response = ReceiptOcrResponse(
+        status="needs_confirmation",
+        store_name="Sample Store",
+        purchased_at="2026-05-12",
+        total_amount=636,
+        items=[],
+        warnings=[],
+    )
+
+    assert response.store_name == "Sample Store"
+
+
 def test_invalid_status_fails() -> None:
     with pytest.raises(ValidationError):
         ReceiptOcrResponse(status="confirmed")

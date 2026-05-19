@@ -20,6 +20,10 @@ ReceiptOcrResponse JSON shape.
 Use status = "needs_confirmation".
 Use null for unknown optional values.
 Do not invent values that are not supported by the OCR text.
+For store_name, use a visible receipt header store, branch, supermarket, or
+convenience store name only. Do not use an address, phone number, or company
+name alone. If the store name is unclear or low confidence, return null and add
+a warning.
 Return warnings for uncertainty, ignored lines, unclear dates, unclear totals, or
 unit conversion uncertainty.
 Do not include database IDs, product IDs, category IDs, inventory updates, recipe

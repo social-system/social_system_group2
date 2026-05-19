@@ -139,6 +139,7 @@ def test_service_returns_valid_response_with_fake_providers() -> None:
 
     assert isinstance(response, ReceiptOcrResponse)
     assert response.status == "needs_confirmation"
+    assert response.store_name == "Test Store"
     assert gemini_provider.received_image_bytes == b"receipt-image"
     assert gemini_provider.received_mime_type == "image/jpeg"
     assert gemini_provider.received_filename == "receipt.jpg"

@@ -6,6 +6,7 @@ import pytest
 from app.providers.errors import ProviderConfigurationError, ProviderExecutionError
 from app.providers.errors import ProviderInvalidResponseError
 from app.providers.openai_structured_provider import (
+    OPENAI_RECEIPT_NORMALIZATION_INSTRUCTIONS,
     OPENAI_RECEIPT_RESPONSE_FORMAT,
     OpenAIStructuredProvider,
 )
@@ -106,6 +107,13 @@ def test_provider_sends_schema_constrained_request() -> None:
 
     assert result["status"] == "needs_confirmation"
     assert client.received_model == "openai-test-model"
+    assert client.received_instructions == OPENAI_RECEIPT_NORMALIZATION_INSTRUCTIONS
+    assert "For store_name" in client.received_instructions
+    assert "receipt header store" in client.received_instructions
+    assert "Do not use an address, phone number, or company" in (
+        client.received_instructions
+    )
+    assert "low confidence, return null" in client.received_instructions
     assert client.received_gemini_result == "fake gemini receipt text"
     assert client.received_response_format == OPENAI_RECEIPT_RESPONSE_FORMAT
     assert client.received_response_format["strict"] is True
@@ -113,6 +121,8 @@ def test_provider_sends_schema_constrained_request() -> None:
 
     schema = client.received_response_format["schema"]
     assert set(schema["required"]) == set(schema["properties"])
+    assert "store_name" in schema["required"]
+    assert schema["properties"]["store_name"]["type"] == ["string", "null"]
     item_schema = schema["properties"]["items"]["items"]
     assert set(item_schema["required"]) == set(item_schema["properties"])
     assert "null" in schema["properties"]["store_name"]["type"]
@@ -129,7 +139,23 @@ def test_provider_returns_dict_matching_receipt_ocr_response() -> None:
 
     response = ReceiptOcrResponse.model_validate(result)
     assert response.status == "needs_confirmation"
+    assert response.store_name == "Test Store"
     assert response.items[0].line_total == 100
+
+
+def test_provider_accepts_null_store_name() -> None:
+    result = valid_receipt_response_dict()
+    result["store_name"] = None
+    result["items"] = []
+    provider = OpenAIStructuredProvider(
+        settings=FakeOpenAISettings(),
+        client=MockOpenAIClient(result=result),
+    )
+
+    normalized = asyncio.run(provider.normalize_receipt(gemini_result="fake receipt"))
+
+    response = ReceiptOcrResponse.model_validate(normalized)
+    assert response.store_name is None
 
 
 @pytest.mark.parametrize("api_key", [None, ""])

@@ -84,10 +84,33 @@ def test_valid_image_upload_returns_needs_confirmation() -> None:
     response = post_extract_with_service(service)
 
     assert response.status_code == 200
-    assert response.json()["status"] == "needs_confirmation"
+    payload = response.json()
+    assert payload["status"] == "needs_confirmation"
+    assert payload["store_name"] == "Test Store"
     assert service.received_image_bytes == b"receipt-image"
     assert service.received_mime_type == "image/jpeg"
     assert service.received_filename == "receipt.jpg"
+
+
+def test_extract_response_allows_null_store_name() -> None:
+    service = FakeReceiptOcrService(
+        ReceiptOcrResponse(
+            status="needs_confirmation",
+            store_name=None,
+            purchased_at="2026-05-12",
+            total_amount=636,
+            items=[],
+            warnings=["Store name could not be read."],
+        )
+    )
+
+    response = post_extract_with_service(service)
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert "store_name" in payload
+    assert payload["store_name"] is None
+    assert payload["warnings"] == ["Store name could not be read."]
 
 
 def test_unsupported_mime_type_returns_400() -> None:
