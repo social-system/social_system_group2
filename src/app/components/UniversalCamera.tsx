@@ -81,24 +81,38 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
         const data = await response.json();
         const apiItems = data.items || [];
-
-        const totalAmount = apiItems.reduce((sum: number, item: any) => {
-          return sum + (Number(item.price) || 0) * (Number(item.quantity) || 1);
+        
+// 💡 【修正】0円問題を解決！
+        const totalAmount = Number(data.total_amount) || apiItems.reduce((sum: number, item: any) => {
+          return sum + (Number(item.line_total) || Number(item.unit_price) || 0);
         }, 0);
 
+        // 💡 【修正】家計簿データに、正しい「内訳（items）」の配列も含めて渡すようにします
+        // これにより、家計簿タブ側でレシートごとの内訳・明細が正しく表示されるようになります
         const expense = apiItems.length > 0 ? {
           amount: totalAmount,
           category: "レシートデータ",
           description: data.store_name || "店舗名未設定",
           date: new Date(),
+          items: apiItems.map((item: any) => ({
+            name: item.normalized_name || item.raw_name || "不明な商品",
+            price: Number(item.line_total) || Number(item.unit_price) || 0,
+            quantity: Number(item.purchased_quantity) || Number(item.quantity) || 1
+          }))
         } : undefined;
 
-        const inventoryItems = apiItems.map((item: any) => ({
-          name: item.name,
-          quantity: Number(item.quantity) || 1,
-          unit: "個",
-          category: "食材",
-        }));
+        // 💡 【修正】在庫管理（冷蔵庫）の明細も、キー名をバックエンドの仕様（normalized_name, purchased_quantity）に完全一致させます
+        const inventoryItems = apiItems
+          .filter((item: any) => {
+            const name = String(item.normalized_name || item.raw_name || "");
+            return !name.includes("割引") && !name.includes("値引き");
+          })
+          .map((item: any) => ({
+            name: item.normalized_name || item.raw_name || "不明な食材",
+            quantity: Number(item.purchased_quantity) || Number(item.quantity) || 1,
+            unit: item.purchased_unit || item.base_unit || "個",
+            category: "食材",
+          }));
 
         return {
           expense,
