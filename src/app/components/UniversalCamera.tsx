@@ -63,7 +63,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       const blob = await res.blob();
       const formData = new FormData();
       
-      formData.append("upload_file", blob, "capture.jpg");
+      //formData.append("upload_file", blob, "capture.jpg");
+      formData.append("file", blob, "capture.jpg");
 
       try {
         //const response = await fetch("http://localhost:8000/ocr/receipts/extract", {
