@@ -376,7 +376,8 @@ export default function App() {
     const currentPrompt = prompt || "おすすめのレシピ";    
 
     try {
-      const response = await fetch("http://localhost:8080/api/v1/recipes/suggest", {
+      const response = await fetch("https://social-system-group2-1.onrender.com/api/v1/recipes/suggest", {
+      //const response = await fetch("http://localhost:8080/api/v1/recipes/suggest", {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -483,7 +484,8 @@ export default function App() {
   const handleFinalAdd = async (recipe: Recipe) => {
     try {
       // 1. バックエンドAPI（POST /api/v1/recipes/accept）に在庫消費リクエストを送信
-      const acceptResponse = await fetch("http://localhost:8080/api/v1/recipes/accept", {
+      const acceptResponse = await fetch("https://social-system-group2-1.onrender.com/api/v1/recipes/accept", {
+      //const acceptResponse = await fetch("http://localhost:8080/api/v1/recipes/accept", {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
