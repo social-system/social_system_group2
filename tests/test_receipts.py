@@ -4,6 +4,7 @@ from app.receipts.models import AccountingCategory, Product
 def make_receipt_payload(
     *,
     purchased_at: int = 20260428,
+    store_name: str | None = "sample store",
     total_amount: int = 500,
     raw_name: str = "milk",
     normalized_name: str | None = "milk",
@@ -19,7 +20,7 @@ def make_receipt_payload(
 
     return {
         "purchased_at": purchased_at,
-        "store_name": "sample store",
+        "store_name": store_name,
         "total_amount": total_amount,
         "items": [
             {

@@ -1,68 +1,45 @@
 # レシート・家計簿・在庫データベース API
 
-このリポジトリは、レシート OCR の結果を直接保存するためのものではなく、ユーザーが確認した購入履歴を保存するバックエンドです。
+このリポジトリは、ユーザー確認済みのレシート購入履歴を保存する FastAPI バックエンドです。
 
-OCR は誤読や欠損を含む可能性があるため、OCR 結果は一度フロントエンドに返し、ユーザーが修正・確認した後で、この API に登録します。
+OCR API ではありません。画像アップロード、OCR 処理、OCR 仮データ保存、Gemini 連携、OpenAI Structured Outputs、フロントエンド、レシピ提案 API、認証、ユーザー管理はこのリポジトリでは扱いません。
 
 ```text
-レシート画像
-  -> OCR API
-  -> Gemini で画像読解
-  -> OpenAI Structured Outputs で仮 JSON 化
-  -> フロントエンドでユーザー確認
-  -> この DB API に確定データとして登録
-  -> 在庫対象の商品を在庫へ反映
-  -> 家計簿・在庫管理・AI レシピ提案で利用
+OCR 結果 = 仮データ
+DB 登録データ = ユーザー確認済みデータ
 ```
 
-## この API の責務
+フロントエンドで購入日、店舗名、合計金額、明細、在庫対象、共通単位をユーザーが確認した後、その確定データだけを `POST /receipts` で登録します。
 
-この API の責務は、確認済みの購入履歴と現在在庫を保存し、次の機能から使える形にすることです。
+## 責務
 
-| 利用先 | 必要なデータ |
+この API は、家計簿、在庫管理、AI レシピ提案などの外部機能が共通で使える購入履歴と在庫情報を提供します。
+
+| 利用先 | この API が提供するデータ |
 | --- | --- |
-| 家計簿 | 購入日、店舗名、カテゴリ、金額 |
-| 在庫管理 | 商品名、数量、単位、保管場所、期限、増減履歴 |
-| AI レシピ提案 | 正規化された商品名、現在数量、共通単位、期限 |
+| 家計簿 | 購入日、店舗名、カテゴリ、支払額、明細合計、差額 |
+| 在庫管理 | 商品、数量、単位、保管場所、期限、在庫増減履歴 |
+| 価格比較 | 商品ごとの共通単位あたり価格と最安購入店舗 |
+| AI レシピ提案 | 在庫 API から取得できる商品名、数量、単位、期限 |
 
-この API は OCR を実行しません。画像ファイルも保存しません。料理AIもこの API の内部では実行せず、外部のAI機能が在庫APIのレスポンスを読んで献立やレシピを提案する構成です。
+料理 AI やレシピ提案は、この API の外側で実装します。AI 側は `GET /inventory/balances` や `GET /inventory/batches` のレスポンスを利用します。
 
-## 現在実装されている機能
+## 実装済み機能
 
 | 区分 | 内容 |
 | --- | --- |
-| レシート管理 | 確認済みレシートの登録、一覧、詳細、削除 |
+| レシート管理 | 登録、一覧、詳細、削除 |
 | 明細管理 | 購入時の商品名・数量と、在庫/レシピ用の正規化名・共通単位を保存 |
-| 家計簿連携 | 購入日、店舗、カテゴリ、支払額、明細合計、差額を取得可能 |
-| 在庫反映 | レシート明細のうち在庫対象の商品を在庫ロットへ反映 |
+| 店舗名管理 | `receipts.store_name` を nullable で保存・返却 |
+| 価格比較 | 指定商品の過去購入履歴から共通単位あたり最安店舗を取得 |
+| 在庫反映 | レシート明細を在庫ロットへ反映 |
 | 在庫残量 | 商品単位の現在在庫を取得 |
-| 在庫ロット | 購入日、期限、保管場所、残量、ステータスをロット単位で管理 |
-| 在庫増減履歴 | 購入反映、消費、廃棄、手動調整の履歴を保存 |
-
-## 外部機能との連携方針
-
-このバックエンドは、外部機能に対して「確定済みデータ」と「現在在庫」を提供するデータAPIです。OCR、画像保存、料理AI、フロントエンド画面そのものは別コンポーネントとして扱います。
-
-```text
-フロントエンド
-  -> OCR API から仮データを受け取る
-  -> ユーザーが購入日、店舗、金額、明細、在庫対象、共通単位を確認する
-  -> POST /receipts に確定データを送る
-  -> 必要に応じて POST /inventory/receipts/{receipt_id}/apply を呼ぶ
-  -> GET /receipts / GET /inventory/* で画面表示する
-
-料理AI・レシピ提案
-  -> GET /inventory/balances で使える食材と数量を取得する
-  -> GET /inventory/batches で期限の近い食材を取得する
-  -> 外部AI側でレシピ候補を生成する
-  -> 使用後は POST /inventory/movements で消費量を在庫から差し引く
-```
-
-フロントエンドからの利用を想定し、開発環境では `http://localhost:5173` からの CORS を許可しています。
+| 在庫ロット | 購入日、期限、保管場所、残量、ステータスを管理 |
+| 在庫増減 | 消費、廃棄、手動調整と履歴取得 |
 
 ## 使用技術
 
-- Python
+- Python 3.12+
 - FastAPI
 - SQLAlchemy
 - SQLite
@@ -70,24 +47,34 @@ OCR は誤読や欠損を含む可能性があるため、OCR 結果は一度フ
 - pytest
 - uv
 
-## 設計方針
+## データ設計
 
-開発初期のため、既存テーブルとの互換性は維持せず、テーブル定義を作り直します。
+詳細は `docs/DATABASE_DESIGN.md` と `docs/INVENTORY_IMPLEMENTATION_SPEC.md` を参照してください。
 
-現時点では一人用のローカルアプリとして扱うため、認証、ユーザー管理、世帯管理、`user_id` によるデータ分離は実装しません。
-
-商品名は、レシート上の表記とアプリ内で扱う表記を分けます。
+主なテーブル:
 
 ```text
-raw_name           レシート上の商品名
-normalized_name    アプリ内で扱う商品名
+receipts
+receipt_items
+accounting_categories
+products
+product_aliases
+product_unit_conversions
+inventory_locations
+inventory_batches
+inventory_operations
+inventory_movements
 ```
 
-数量と単位も、購入時の表記と在庫・レシピ用の共通単位を分けます。
+レシート明細では、購入時の表記とアプリ内で扱う共通単位を分けます。
 
 ```text
-purchased_quantity / purchased_unit    購入時の数量と単位
-base_quantity / base_unit              在庫・レシピ用に変換した数量と単位
+raw_name              レシート上の商品名
+normalized_name       アプリ内で扱う商品名
+purchased_quantity    購入時の数量
+purchased_unit        購入時の単位
+base_quantity         在庫・レシピ用に変換した数量
+base_unit             在庫・レシピ用の共通単位
 ```
 
 例:
@@ -103,22 +90,33 @@ base_quantity / base_unit              在庫・レシピ用に変換した数�
 }
 ```
 
-## 主要テーブル
+`store_name` は nullable です。OCR で店名が取れない場合や、ユーザーが空欄で確定する場合を許容します。
 
-レシート、商品、カテゴリの詳細は `docs/DATABASE_DESIGN.md` を参照してください。在庫管理の詳細は `docs/INVENTORY_IMPLEMENTATION_SPEC.md` を参照してください。
+## セットアップ
+
+```bash
+uv sync
+```
+
+必要に応じて仮想環境を有効化します。
+
+```bash
+source .venv/bin/activate
+```
+
+## 起動
+
+```bash
+uv run uvicorn app.main:app --reload
+```
+
+既定の URL:
 
 ```text
-receipts
-receipt_items
-accounting_categories
-products
-product_aliases
-product_unit_conversions
-inventory_locations
-inventory_batches
-inventory_operations
-inventory_movements
+http://localhost:8000
 ```
+
+開発環境では `http://localhost:5173` からの CORS を許可しています。
 
 ## API
 
@@ -164,19 +162,6 @@ Request:
       "unit_price": 238,
       "line_total": 238,
       "is_inventory_target": true
-    },
-    {
-      "raw_name": "センザイ",
-      "normalized_name": "洗剤",
-      "product_id": null,
-      "category_id": 2,
-      "purchased_quantity": 1,
-      "purchased_unit": "個",
-      "base_quantity": null,
-      "base_unit": null,
-      "unit_price": 398,
-      "line_total": 398,
-      "is_inventory_target": false
     }
   ]
 }
@@ -192,20 +177,20 @@ Response:
   "total_amount": 636,
   "items_total": 636,
   "adjustment_amount": 0,
-  "item_count": 2
+  "item_count": 1
 }
 ```
 
 `items_total` と `adjustment_amount` はサーバー側で計算します。
 
 ```text
-items_total = sum(item.line_total)
+items_total = sum(line_total)
 adjustment_amount = total_amount - items_total
 ```
 
-レシートには割引、ポイント利用、税、OCR 漏れがあるため、`total_amount == items_total` は必須条件にしません。
+レシートには割引、ポイント、税、レジ袋、OCR 漏れなどがあるため、`total_amount == items_total` は必須にしません。
 
-### レシート一覧取得
+### レシート一覧
 
 ```http
 GET /receipts
@@ -213,14 +198,14 @@ GET /receipts
 
 Query parameters:
 
-| 名前 | 内容 |
-| --- | --- |
-| `skip` | 取得開始位置 |
-| `limit` | 取得件数 |
-| `date_from` | 開始日。`YYYYMMDD` 形式 |
-| `date_to` | 終了日。`YYYYMMDD` 形式 |
-| `category_id` | カテゴリで絞り込む場合に指定 |
-| `inventory_only` | `true` の場合、在庫対象を含むレシートだけを対象にする |
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `skip` | int | no | 取得開始位置 |
+| `limit` | int | no | 取得件数 |
+| `date_from` | int | no | 開始日。`YYYYMMDD` |
+| `date_to` | int | no | 終了日。`YYYYMMDD` |
+| `category_id` | int | no | カテゴリで絞り込み |
+| `inventory_only` | bool | no | 在庫対象明細を含むレシートに絞り込み |
 
 Response:
 
@@ -233,12 +218,12 @@ Response:
     "total_amount": 636,
     "items_total": 636,
     "adjustment_amount": 0,
-    "item_count": 2
+    "item_count": 1
   }
 ]
 ```
 
-### レシート詳細取得
+### レシート詳細
 
 ```http
 GET /receipts/{receipt_id}
@@ -273,8 +258,6 @@ Response:
 }
 ```
 
-Decimal は JSON では文字列または数値のどちらでもよいですが、プロジェクト内で統一してください。推奨は文字列です。
-
 ### レシート削除
 
 ```http
@@ -290,13 +273,69 @@ Response:
 }
 ```
 
+### 最安購入店舗取得
+
+```http
+GET /prices/cheapest
+```
+
+Query parameters:
+
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | yes | 対象商品 ID |
+| `period_days` | int | no | 過去何日を対象にするか。既定値は `90` |
+
+指定された `product_id` について、過去 `period_days` 日間の購入履歴から、共通単位あたり価格が最も安い購入明細と店名を返します。
+
+比較には `line_total / base_quantity` を使います。単純に `line_total` が最小の明細は選びません。
+
+対象外になる明細:
+
+- `base_quantity` が `null`
+- `base_quantity <= 0`
+- `base_unit` が `null`
+- `receipts.store_name` が `null`
+- `product_id` が一致しない
+- `purchased_at` が `period_days` の範囲外
+
+Response:
+
+```json
+{
+  "product_id": 1,
+  "product_name": "卵",
+  "period_days": 90,
+  "cheapest": {
+    "store_name": "サンプルスーパー",
+    "price_per_base_unit": 23.8,
+    "line_total": 238,
+    "base_quantity": "10.00",
+    "base_unit": "個",
+    "purchased_at": 20260512,
+    "receipt_item_id": 31
+  }
+}
+```
+
+該当データがない場合:
+
+```json
+{
+  "product_id": 1,
+  "product_name": "卵",
+  "period_days": 90,
+  "cheapest": null
+}
+```
+
 ### レシートを在庫へ反映
 
 ```http
 POST /inventory/receipts/{receipt_id}/apply
 ```
 
-レシート明細のうち、`is_inventory_target = true` で、`product_id`、`base_quantity`、`base_unit` がそろっている明細を在庫ロットへ反映します。同じレシート明細は二重に在庫化しません。
+`is_inventory_target = true` で、`product_id`、`base_quantity`、`base_unit` がそろっている明細を在庫ロットへ反映します。同じレシート明細は二重に在庫化しません。
 
 Request:
 
@@ -317,7 +356,7 @@ Response:
   "receipt_id": 12,
   "operation_id": 100,
   "applied_count": 1,
-  "skipped_count": 1,
+  "skipped_count": 0,
   "items": [
     {
       "receipt_item_id": 31,
@@ -326,19 +365,14 @@ Response:
       "quantity": "10.00",
       "unit": "個",
       "batch_id": 201,
-      "status": "applied"
-    },
-    {
-      "receipt_item_id": 32,
-      "product_name": "洗剤",
-      "status": "skipped",
-      "reason": "not_inventory_target"
+      "status": "applied",
+      "reason": null
     }
   ]
 }
 ```
 
-### 在庫残量取得
+### 在庫残量
 
 ```http
 GET /inventory/balances
@@ -346,11 +380,11 @@ GET /inventory/balances
 
 Query parameters:
 
-| 名前 | 内容 |
-| --- | --- |
-| `product_id` | 商品で絞り込む場合に指定 |
-| `location_id` | 保管場所で絞り込む場合に指定 |
-| `include_zero` | `true` の場合、残量 0 の在庫も含める |
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | no | 商品で絞り込み |
+| `location_id` | int | no | 保管場所で絞り込み |
+| `include_zero` | bool | no | 残量 0 の在庫も含める |
 
 Response:
 
@@ -369,7 +403,7 @@ Response:
 }
 ```
 
-### 在庫ロット一覧取得
+### 在庫ロット一覧
 
 ```http
 GET /inventory/batches
@@ -377,13 +411,13 @@ GET /inventory/batches
 
 Query parameters:
 
-| 名前 | 内容 |
-| --- | --- |
-| `product_id` | 商品で絞り込む場合に指定 |
-| `location_id` | 保管場所で絞り込む場合に指定 |
-| `status` | `active` / `depleted` / `discarded` |
-| `expires_before` | 指定日以前に期限が来るもの |
-| `include_zero` | `true` の場合、残量 0 の在庫も含める |
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | no | 商品で絞り込み |
+| `location_id` | int | no | 保管場所で絞り込み |
+| `status` | string | no | `active` / `depleted` / `discarded` |
+| `expires_before` | date | no | 指定日以前に期限が来るもの |
+| `include_zero` | bool | no | 残量 0 の在庫も含める |
 
 Response:
 
@@ -414,7 +448,7 @@ Response:
 POST /inventory/movements
 ```
 
-消費、廃棄、手動調整を登録します。`batch_id` を指定しない消費・廃棄では、期限が近いロットから順に差し引きます。現在の実装では `movement_type` は `consume`、`dispose`、`adjust` を受け取ります。`adjust` は正の数量なら手動追加、負の数量なら手動減少として扱います。
+`movement_type` は `consume`、`dispose`、`adjust` を受け取ります。`batch_id` を指定しない消費・廃棄では、期限が近いロットから順に差し引きます。
 
 Request:
 
@@ -453,7 +487,7 @@ Response:
 }
 ```
 
-### 在庫増減履歴取得
+### 在庫増減履歴
 
 ```http
 GET /inventory/movements
@@ -461,16 +495,16 @@ GET /inventory/movements
 
 Query parameters:
 
-| 名前 | 内容 |
-| --- | --- |
-| `product_id` | 商品で絞り込む場合に指定 |
-| `batch_id` | 在庫ロットで絞り込む場合に指定 |
-| `operation_id` | 操作単位で絞り込む場合に指定 |
-| `movement_type` | 増減種別で絞り込む場合に指定 |
-| `from_date` | 発生日の開始日 |
-| `to_date` | 発生日の終了日 |
-| `limit` | 取得件数。既定値は 100 |
-| `offset` | 取得開始位置。既定値は 0 |
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | no | 商品で絞り込み |
+| `batch_id` | int | no | 在庫ロットで絞り込み |
+| `operation_id` | int | no | 操作単位で絞り込み |
+| `movement_type` | string | no | 増減種別で絞り込み |
+| `from_date` | date | no | 発生日の開始日 |
+| `to_date` | date | no | 発生日の終了日 |
+| `limit` | int | no | 取得件数。既定値は `100` |
+| `offset` | int | no | 取得開始位置。既定値は `0` |
 
 Response:
 
@@ -508,62 +542,40 @@ Response:
 | 存在しない `receipt_id` | 404 |
 | 存在しない `product_id` または `category_id` | 400 |
 
-`unit_price * purchased_quantity == line_total` は必須条件にしません。税込価格、まとめ割、量り売り、小数数量でずれることがあるためです。
+在庫 API では、存在しない `receipt_id`、`product_id`、`batch_id` は `404`、存在しない `location_id`、単位不一致、在庫不足、無効な `status` は `400` として扱います。
 
-在庫APIでは、存在しない `receipt_id`、`product_id`、`batch_id` は `404`、存在しない `location_id`、単位不一致、在庫不足、無効な `status` は `400` として扱います。型や `quantity = 0` などのPydanticで検出できる入力不備は `422` です。
+`unit_price * purchased_quantity == line_total` は必須にしません。
 
-## 料理AI連携で使う主なデータ
-
-料理AIやレシピ提案機能は、このバックエンドの外側で実装します。AI側へ渡す候補データは、在庫APIから取得します。
-
-| 目的 | API | 利用する主な項目 |
-| --- | --- | --- |
-| 使える食材一覧 | `GET /inventory/balances` | `product_name`, `quantity`, `unit`, `nearest_expires_at` |
-| 期限優先の提案 | `GET /inventory/batches` | `expires_at`, `current_quantity`, `location_name` |
-| 使用後の在庫反映 | `POST /inventory/movements` | `movement_type=consume`, `quantity`, `unit`, `reason` |
-
-AIに渡す場合も、購入時単位ではなく `base_quantity` / `base_unit` から作られた在庫単位を使います。たとえば「卵 1パック」は、在庫API上では「卵 10.00 個」として扱います。
-
-## セットアップ
-
-```bash
-uv sync
-```
-
-必要に応じて仮想環境を有効化します。
-
-```bash
-source .venv/bin/activate
-```
-
-## 起動方法
-
-```bash
-uv run uvicorn app.main:app --reload
-```
-
-通常は以下で起動します。
-
-```text
-http://localhost:8000
-```
+`total_amount == sum(line_total)` も必須にしません。
 
 ## テスト
 
 ```bash
+uv run python -m compileall app
 uv run pytest
 ```
 
-テストでは通常開発用の `receipts.db` を使わず、テスト用 SQLite DB に差し替えます。
+利用可能なら実行:
 
-## Codex で実装する場合
-
-Codex に作業させる前に、以下を確認させてください。
-
-```text
-AGENTS.md
-docs/DATABASE_DESIGN.md
-docs/CODEX_IMPLEMENTATION_PLAN.md
+```bash
+uv run ruff check .
 ```
 
-今回の方針ではテーブル定義を作り直すため、既存 DB の互換性維持は不要です。ただし、実レシートデータが入っている `receipts.db` を勝手に削除しないでください。
+テストでは通常開発用の `receipts.db` を使わず、一時 SQLite DB に差し替えます。
+
+## 開発時の注意
+
+- 既存の `receipts.db` に実データが入っている可能性があるため、勝手に削除しないでください。
+- Alembic は導入していません。
+- 本番 DB 対応は未実装です。
+- GitHub への push は行いません。
+- ローカル commit は利用者から明示された場合のみ行います。
+
+## 関連ドキュメント
+
+- `AGENTS.md`
+- `docs/DATABASE_DESIGN.md`
+- `docs/API_SPEC.md`
+- `docs/OCR_DB_INTERFACE.md`
+- `docs/CODEX_IMPLEMENTATION_PLAN.md`
+- `docs/INVENTORY_IMPLEMENTATION_SPEC.md`

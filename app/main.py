@@ -9,6 +9,7 @@ from app.db.session import SessionLocal
 from app.inventory import models as inventory_models
 from app.receipts import models as receipt_models
 from app.routes.inventory import router as inventory_router
+from app.routes.prices import router as prices_router
 from app.routes.receipts import router as receipts_router
 
 if os.environ.get("APP_ENV") != "test":
@@ -31,6 +32,7 @@ app.add_middleware(
 
 app.include_router(receipts_router)
 app.include_router(inventory_router)
+app.include_router(prices_router)
 
 
 @app.get("/")
