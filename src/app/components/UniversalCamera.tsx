@@ -67,7 +67,7 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
       try {
         //const response = await fetch("http://localhost:8000/ocr/receipts/extract", {
-        const response = await fetch("https://social-system-group2.onrender.com/health", {
+        const response = await fetch("https://social-system-group2.onrender.com/ocr/receipts/extract", {
 
           method: "POST",
           body: formData,
