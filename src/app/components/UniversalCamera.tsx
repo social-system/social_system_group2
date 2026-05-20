@@ -2,6 +2,15 @@ import { useRef, useState, useEffect } from 'react';
 import { Camera, X, Check, Sparkles } from 'lucide-react';
 import type { Expense, InventoryItem } from '../App';
 
+
+//const kakeibo_URL = "http://localhost:8000";
+const kakeibo_URL = "https://social-system-group2.onrender.com";
+
+
+//const recipe_URL = "http://localhost:8080";
+const recipe_URL = "https://social-system-group2-1.onrender.com";
+
+
 interface ExtractedData {
   expense?: Omit<Expense, 'id'>;
   inventoryItems?: Omit<InventoryItem, 'id'>[];
@@ -67,8 +76,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       formData.append("file", blob, "capture.jpg");
 
       try {
-        //const response = await fetch("http://localhost:8000/ocr/receipts/extract", {
-        const response = await fetch("https://social-system-group2.onrender.com/ocr/receipts/extract", {
+        //const response = await fetch(`http://localhost:8000/ocr/receipts/extract`, {
+        const response = await fetch(`${kakeibo_URL}/ocr/receipts/extract`, {
 
           method: "POST",
           body: formData,
@@ -222,7 +231,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       };
 
       // 3. バックエンドへ確定データを1つのリクエストとして送信
-      const response = await fetch("http://localhost:8000/receipts", {
+      const response = await fetch(`${kakeibo_URL}/receipts`, {
+      //const response = await fetch(`http://localhost:8000/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
