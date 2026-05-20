@@ -25,6 +25,17 @@ import { AddInventoryForm } from "./components/AddInventoryForm";
 import { AddRecipeForm } from "./components/AddRecipeForm";
 import { SettingsModal } from "./components/SettingsModal";
 
+
+//const kakeibo_URL = "http://localhost:8000";
+const kakeibo_URL = "https://social-system-group2.onrender.com";
+
+
+//const recipe_URL = "http://localhost:8080";
+const recipe_URL = "https://social-system-group2-1.onrender.com";
+
+
+
+
 // --- 型定義 ---
 interface RecipeIngredient {
   name: string;
@@ -190,7 +201,8 @@ export default function App() {
   useEffect(() => {
     const checkHealth = async () => {
       try {
-        const res = await fetch("http://localhost:8000/"); 
+        //const res = await fetch(`http://localhost:8000/`); 
+        const res = await fetch(kakeibo_URL); 
         if (!res.ok) throw new Error(`HTTPエラー: ${res.status}`);
         const data = await res.json();
         console.log("【Health Check 成功】", data);
@@ -210,7 +222,8 @@ export default function App() {
   // 2. 家計簿・レシートデータの読み込み (GET /receipts 仕様に完全準拠)
   const fetchExpenses = async () => {
     try {
-      const res = await fetch("http://localhost:8000/receipts"); 
+      //const res = await fetch(`http://localhost:8000/receipts`); 
+      const res = await fetch(`${kakeibo_URL}/receipts`); 
       if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
       const data = await res.json();
       
@@ -259,7 +272,8 @@ export default function App() {
         ]
       };
 
-      const response = await fetch("http://localhost:8000/receipts", {
+      //const response = await fetch(`http://localhost:8000/receipts`, {
+      const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -282,7 +296,8 @@ export default function App() {
   // 4. 家計簿・レシートデータ削除 (DELETE /receipts/{receipt_id} 仕様に完全準拠)
   const deleteExpenseCall = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/receipts/${id}`, {
+      //const response = await fetch(`http://localhost:8000/receipts/${id}`, {
+      const response = await fetch(`${kakeibo_URL}/receipts/${id}`, {
         method: "DELETE",
       });
 
@@ -322,7 +337,8 @@ export default function App() {
         ]
       };
 
-      const response = await fetch("http://localhost:8000/receipts", {
+      const response = await fetch(`${kakeibo_URL}/receipts`, {
+      //const response = await fetch(`http://localhost:8000/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestBody),
@@ -341,7 +357,8 @@ export default function App() {
   // 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
   const deleteInventoryItemCall = async (id: string) => {
     try {
-      const response = await fetch(`http://localhost:8000/receipts/${id}`, {
+      const response = await fetch(`${kakeibo_URL}/receipts/${id}`, {
+      //const response = await fetch(`http://localhost:8000/receipts/${id}`, {
         method: "DELETE",
       });
 
@@ -376,8 +393,8 @@ export default function App() {
     const currentPrompt = prompt || "おすすめのレシピ";    
 
     try {
-      const response = await fetch("https://social-system-group2-1.onrender.com/api/v1/recipes/suggest", {
-      //const response = await fetch("http://localhost:8080/api/v1/recipes/suggest", {  
+      const response = await fetch(`${recipe_URL}/api/v1/recipes/suggest`, {
+      //const response = await fetch(`http://localhost:8080/api/v1/recipes/suggest`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -428,7 +445,8 @@ export default function App() {
       if (missingIngredient && missingIngredient.productId) {
         // 2. 仕様書に定義されている「最安購入店舗取得」API（GET /prices/cheapest）へ通信
         const pId = missingIngredient.productId;
-        const response = await fetch(`http://localhost:8000/prices/cheapest?product_id=${pId}&period_days=90`);
+        //const response = await fetch(`http://localhost:8000/prices/cheapest?product_id=${pId}&period_days=90`);
+        const response = await fetch(`${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`);
         
         if (response.ok) {
           const data = await response.json();
@@ -484,8 +502,8 @@ export default function App() {
   const handleFinalAdd = async (recipe: Recipe) => {
     try {
       // 1. バックエンドAPI（POST /api/v1/recipes/accept）に在庫消費リクエストを送信
-      const acceptResponse = await fetch("https://social-system-group2-1.onrender.com/api/v1/recipes/accept", {
-      //const acceptResponse = await fetch("http://localhost:8080/api/v1/recipes/accept", {  
+      const acceptResponse = await fetch(`${recipe_URL}/api/v1/recipes/accept`, {
+      //const acceptResponse = await fetch(`http://localhost:8080/api/v1/recipes/accept`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -499,7 +517,8 @@ export default function App() {
       }
 
       // 2. 家計簿側への支出記録処理
-      const response = await fetch("http://localhost:8000/receipts", {
+      const response = await fetch(`${kakeibo_URL}/receipts`, {
+      //const response = await fetch(`http://localhost:8000/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
