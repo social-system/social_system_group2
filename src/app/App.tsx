@@ -211,7 +211,7 @@ export default function App() {
       }
     };
 
-    checkHealth();
+    //checkHealth();
 
     if (!settings.isSetupComplete) {
       setShowSettings(true);
