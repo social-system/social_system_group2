@@ -185,6 +185,7 @@ base_unit
 | --- | --- | --- | --- |
 | `id` | Integer | yes | 主キー |
 | `name` | String(255) | yes | 正規化後の商品名。unique |
+| `name_key` | String(255) | yes | 検索・照合用に正規化した商品名。unique |
 | `default_base_unit` | String(50) | yes | 在庫・レシピで使う標準単位 |
 | `default_category_id` | Integer | no | 既定カテゴリ |
 | `is_inventory_target` | Boolean | yes | 通常在庫対象かどうか |
@@ -193,12 +194,12 @@ base_unit
 
 例:
 
-| name | default_base_unit | is_inventory_target |
-| --- | --- | --- |
-| 卵 | 個 | true |
-| 牛乳 | ml | true |
-| 米 | g | true |
-| 洗剤 | 個 | false |
+| name | name_key | default_base_unit | is_inventory_target |
+| --- | --- | --- | --- |
+| 卵 | 卵 | 個 | true |
+| 牛乳 | 牛乳 | ml | true |
+| 米 | 米 | g | true |
+| 洗剤 | 洗剤 | 個 | false |
 
 ## product_aliases
 
@@ -207,18 +208,21 @@ base_unit
 | カラム | 型 | 必須 | 説明 |
 | --- | --- | --- | --- |
 | `id` | Integer | yes | 主キー |
-| `raw_name` | String(255) | yes | レシート上の商品名。unique |
 | `product_id` | Integer | yes | `products.id` |
+| `alias_name` | String(255) | yes | OCR やユーザー入力で出現した商品名 |
+| `alias_key` | String(255) | yes | 検索・照合用に正規化した別名。unique |
+| `source` | String(50) | yes | alias が作られた理由。例: `manual`, `seed`, `user_confirmed`, `ocr` |
+| `is_active` | Boolean | yes | 無効化用フラグ |
 | `created_at` | DateTime | yes | 作成日時 |
 | `updated_at` | DateTime | yes | 更新日時 |
 
 例:
 
-| raw_name | product |
-| --- | --- |
-| タマゴM 10コ | 卵 |
-| 白たまご | 卵 |
-| 牛乳1000ml | 牛乳 |
+| alias_name | alias_key | product |
+| --- | --- | --- |
+| タマゴM 10コ | タマゴM10コ | 卵 |
+| 白たまご | 白たまご | 卵 |
+| 牛乳1000ml | 牛乳1000ml | 牛乳 |
 
 ## product_unit_conversions
 

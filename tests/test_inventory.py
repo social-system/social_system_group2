@@ -8,6 +8,7 @@ from app.receipts.models import Product, Receipt, ReceiptItem
 def create_product(db_session, *, name: str = "eggs", unit: str = "pcs") -> Product:
     product = Product(
         name=name,
+        name_key=name,
         default_base_unit=unit,
         is_inventory_target=True,
     )

@@ -7,6 +7,7 @@ from app.receipts.models import Product
 def make_product(db_session, *, name: str = "egg", unit: str = "個") -> Product:
     product = Product(
         name=name,
+        name_key=name,
         default_base_unit=unit,
         is_inventory_target=True,
     )

@@ -110,6 +110,7 @@ class Product(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    name_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     default_base_unit: Mapped[str] = mapped_column(String(50), nullable=False)
     default_category_id: Mapped[int | None] = mapped_column(
         ForeignKey("accounting_categories.id"),
@@ -144,8 +145,11 @@ class ProductAlias(Base):
     __tablename__ = "product_aliases"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    raw_name: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    alias_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    alias_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
         server_default=func.now(),

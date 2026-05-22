@@ -272,6 +272,7 @@ def test_create_receipt_accepts_existing_product_and_category(client, db_session
     db_session.flush()
     product = Product(
         name="milk",
+        name_key="milk",
         default_base_unit="ml",
         default_category_id=category.id,
         is_inventory_target=True,
