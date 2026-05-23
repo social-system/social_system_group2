@@ -22,16 +22,33 @@ OCR API
 ## 実装順
 
 ```text
-MILESTONE00  全体方針確認
-MILESTONE01  商品名キーとaliasテーブル強化
-MILESTONE02  商品名正規化関数とproduct_id解決ロジック
-MILESTONE03  POST /receipts/prepare API
-MILESTONE04  商品検索APIとalias学習API
-MILESTONE05  POST /receiptsとの整合性強化
-MILESTONE06  最安店APIとの整合性確認
-MILESTONE07  OCR側契約の最小修正
-MILESTONE08  結合テストとドキュメント更新
+MILESTONE00  全体方針確認                              done
+MILESTONE01  商品名キーとaliasテーブル強化              done
+MILESTONE02  商品名正規化関数とproduct_id解決ロジック   done
+MILESTONE03  POST /receipts/prepare API                 done
+MILESTONE04  商品検索APIとalias学習API                  done
+MILESTONE05  POST /receiptsとの整合性強化               done
+MILESTONE06  最安店APIとの整合性確認                    done
+MILESTONE07  OCR側契約の最小修正                        done
+MILESTONE08  結合テストとドキュメント更新               done
 ```
+
+## MILESTONE08 完了メモ
+
+DB リポジトリ側で、OCR 風 JSON から `POST /receipts/prepare`、`POST /receipts`、`GET /prices/cheapest` までの結合テストを追加した。
+
+確認済みの流れ:
+
+```text
+OCR は product_id / category_id を決めない
+DB の prepare API が product_aliases / products を使って product_id を解決する
+product_aliases が OCR 名の表記揺れを吸収する
+prepare 結果の receipt を POST /receipts に渡して保存できる
+最安店表示は product_id と line_total / base_quantity を使う
+product_id 未解決の商品は最安店検索対象にならない
+```
+
+`normalized_name` は OCR 候補であり、DB 正式名とは限らない。`product_id` が解決できた場合、prepare 結果では DB 正式名である `products.name` に寄せる。
 
 ## Codexへの渡し方
 

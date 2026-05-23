@@ -12,11 +12,18 @@ OCR API は仮データを返し、DB API はユーザー確認済みデータ�
 レシート画像
   -> OCR API
   -> OCR 仮データ
+  -> DB API POST /receipts/prepare
+  -> DB 側で product_id 解決、日付変換、OCR 専用項目除去
   -> フロントエンド確認画面
   -> ユーザー修正
   -> DB API POST /receipts
   -> 確定データ保存
+  -> GET /prices/cheapest で最安店表示
 ```
+
+OCR API は `product_id`、`category_id`、`product_aliases` を扱わない。OCR の `normalized_name` は AI が推定した商品名候補であり、DB が管理する正式名 `products.name` と一致する保証はない。
+
+DB API の `POST /receipts/prepare` は、OCR 仮データを登録前の確認画面で扱いやすい形に整える。`raw_name` / `normalized_name` を `products.name_key` と `product_aliases.alias_key` に照合し、解決できた場合だけ `product_id` を入れる。解決できない場合は `product_id = null` として `unresolved_items` に含める。
 
 ## OCR API が返す仮データ
 
@@ -27,7 +34,7 @@ OCR API は、不明な値を `null` として返してよい。
 ```json
 {
   "status": "needs_confirmation",
-  "purchased_at": 20260512,
+  "purchased_at": "2026-05-12",
   "store_name": "サンプルスーパー",
   "total_amount": 636,
   "items": [
@@ -67,6 +74,8 @@ OCR API は、不明な値を `null` として返してよい。
 ```
 
 ## DB API に送る確定データ
+
+通常は OCR 仮データを直接変換せず、`POST /receipts/prepare` の `receipt` をユーザー確認後に `POST /receipts` へ渡す。
 
 DB API に送る時点では、在庫対象データに必要な項目を埋める。
 
@@ -116,9 +125,34 @@ DB API は OCR の信頼度や警告を保存しない。
 
 将来、OCR 結果の再編集や監査が必要になった場合は、別途 `receipt_ocr_drafts` テーブルを追加する。
 
+## product_aliases による表記揺れ吸収
+
+`product_aliases` は OCR 名やユーザー入力名を商品マスタへ対応させる。
+
+例:
+
+```text
+タマゴM 10コ -> 卵
+ミソ -> 味噌
+```
+
+未解決商品に対してユーザーが商品を選択したら、フロントエンドは `POST /product-aliases` で alias を登録する。次回以降の `POST /receipts/prepare` では、同じ `alias_key` から `product_id` が解決される。
+
+## 最安店表示との接続
+
+`GET /prices/cheapest` は `receipt_items.product_id` が一致する購入履歴だけを対象にする。
+
+比較には以下を使う。
+
+```text
+price_per_base_unit = line_total / base_quantity
+```
+
+そのため、最安店表示に使うには `product_id`、`store_name`、`base_quantity`、`base_unit` が必要である。`product_id` 未解決の商品は購入履歴として保存できるが、最安店検索の対象にはならない。
+
 ## フロントエンド確認画面で必要な処理
 
-フロントエンドは、OCR API の仮データをそのまま登録ボタンに渡してはいけない。
+フロントエンドは、OCR API の仮データをそのまま登録ボタンに渡してはいけない。`POST /receipts/prepare` を挟むことで、日付形式、OCR 専用項目、商品名解決、カテゴリ補完の変換量を DB 側に寄せられる。
 
 確認画面で最低限、次を確認する。
 

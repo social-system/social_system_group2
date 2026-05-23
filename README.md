@@ -11,6 +11,19 @@ DB 登録データ = ユーザー確認済みデータ
 
 フロントエンドで購入日、店舗名、合計金額、明細、在庫対象、共通単位をユーザーが確認した後、その確定データだけを `POST /receipts` で登録します。
 
+OCR 連携では、OCR API のレスポンスを直接 `POST /receipts` に登録しません。フロントエンドはまず OCR 仮データを `POST /receipts/prepare` に送り、DB 側で日付変換、不要項目除去、`product_id` 解決、カテゴリ補完を行った結果を確認画面で扱います。
+
+```text
+OCR API
+  -> OCR 仮 JSON
+  -> DB API POST /receipts/prepare
+  -> フロントエンド確認画面
+  -> DB API POST /receipts
+  -> GET /prices/cheapest
+```
+
+OCR は `product_id` や `category_id` を決めません。OCR の `normalized_name` は商品名候補であり、DB の正式な `products.name` と一致する保証はありません。DB 側では `products.name_key` と `product_aliases.alias_key` を使って表記揺れを吸収し、未解決の商品は確認画面でユーザーが選択して `POST /product-aliases` により学習させます。
+
 ## 責務
 
 この API は、家計簿、在庫管理、AI レシピ提案などの外部機能が共通で使える購入履歴と在庫情報を提供します。
@@ -189,6 +202,33 @@ adjustment_amount = total_amount - items_total
 ```
 
 レシートには割引、ポイント、税、レジ袋、OCR 漏れなどがあるため、`total_amount == items_total` は必須にしません。
+
+### OCR 仮データの登録準備
+
+```http
+POST /receipts/prepare
+```
+
+OCR レスポンスに近い JSON を受け取り、DB 登録に近い `receipt` オブジェクトへ整形します。この API はレシートを保存しません。
+
+主な処理:
+
+- `purchased_at: "YYYY-MM-DD"` を `YYYYMMDD` の整数に変換
+- OCR 専用の `status`、`warnings`、`confidence` を登録用 `receipt` から除外
+- `raw_name` / `normalized_name` と `product_aliases` / `products` から `product_id` を解決
+- 解決できた場合は `normalized_name` を `products.name` に寄せ、`default_category_id` を補完
+- 解決できない場合は `product_id: null` とし、`unresolved_items` と `product_candidates` を返す
+
+`POST /receipts/prepare` の `receipt` は、ユーザー確認後にできるだけそのまま `POST /receipts` に渡せる形です。
+
+### 商品検索と alias 学習
+
+```http
+GET /products/search?query=タマゴ
+POST /product-aliases
+```
+
+未解決商品に対してフロントエンドが `GET /products/search` で商品候補を探し、ユーザーが「この OCR 名はこの商品」と確認した結果を `POST /product-aliases` に保存します。登録後は同じ `alias_key` が `product_id` 解決に使われます。
 
 ### レシート一覧
 
