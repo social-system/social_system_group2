@@ -111,6 +111,15 @@ def test_create_receipt_rejects_missing_base_quantity_for_inventory_target(clien
     assert response.status_code == 422
 
 
+def test_create_receipt_rejects_missing_base_unit_for_inventory_target(client):
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(base_unit=None),
+    )
+
+    assert response.status_code == 422
+
+
 def test_create_receipt_rejects_missing_product_id(client):
     response = client.post(
         "/receipts",
@@ -291,6 +300,121 @@ def test_create_receipt_accepts_existing_product_and_category(client, db_session
     item = detail_response.json()["items"][0]
     assert item["product_id"] == product.id
     assert item["category_id"] == category.id
+
+
+def test_create_receipt_accepts_prepare_receipt(client, db_session):
+    category = AccountingCategory(name="food", sort_order=1)
+    db_session.add(category)
+    db_session.flush()
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        default_category_id=category.id,
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+    prepare_response = client.post(
+        "/receipts/prepare",
+        json={
+            "status": "needs_confirmation",
+            "store_name": "prepared store",
+            "purchased_at": "2026-05-12",
+            "total_amount": 500,
+            "items": [
+                {
+                    "raw_name": "milk 1 bottle",
+                    "normalized_name": "milk",
+                    "purchased_quantity": 1,
+                    "purchased_unit": "本",
+                    "base_quantity": 1000,
+                    "line_total": 500,
+                    "is_inventory_target": True,
+                    "confidence": 0.9,
+                }
+            ],
+            "warnings": ["confirm"],
+        },
+    )
+    assert prepare_response.status_code == 200
+
+    response = client.post("/receipts", json=prepare_response.json()["receipt"])
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["purchased_at"] == 20260512
+    assert body["store_name"] == "prepared store"
+    assert body["items_total"] == 500
+    assert body["adjustment_amount"] == 0
+    detail = client.get(f"/receipts/{body['id']}").json()
+    item = detail["items"][0]
+    assert item["product_id"] == product.id
+    assert item["category_id"] == category.id
+    assert item["normalized_name"] == "milk"
+    assert item["base_unit"] == "ml"
+
+
+def test_create_receipt_accepts_null_product_id_for_purchase_history(client):
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(product_id=None),
+    )
+
+    assert response.status_code == 201
+    detail = client.get(f"/receipts/{response.json()['id']}").json()
+    assert detail["items"][0]["product_id"] is None
+
+
+def test_create_receipt_fills_product_defaults(client, db_session):
+    category = AccountingCategory(name="food", sort_order=1)
+    db_session.add(category)
+    db_session.flush()
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        default_category_id=category.id,
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(
+            product_id=product.id,
+            category_id=None,
+            normalized_name=None,
+        ),
+    )
+
+    assert response.status_code == 201
+    detail = client.get(f"/receipts/{response.json()['id']}").json()
+    item = detail["items"][0]
+    assert item["product_id"] == product.id
+    assert item["normalized_name"] == "milk"
+    assert item["category_id"] == category.id
+
+
+def test_create_receipt_rejects_ocr_only_top_level_fields(client):
+    payload = make_receipt_payload()
+    payload["status"] = "needs_confirmation"
+    payload["warnings"] = ["confirm"]
+
+    response = client.post("/receipts", json=payload)
+
+    assert response.status_code == 422
+
+
+def test_create_receipt_rejects_ocr_only_item_fields(client):
+    payload = make_receipt_payload()
+    payload["items"][0]["confidence"] = 0.9
+    payload["items"][0]["warnings"] = ["confirm"]
+
+    response = client.post("/receipts", json=payload)
+
+    assert response.status_code == 422
 
 
 def test_delete_receipt(client):

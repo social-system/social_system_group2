@@ -5,21 +5,29 @@ from app.receipts.models import AccountingCategory, Product, Receipt, ReceiptIte
 from app.schemas.receipts_requests import ReceiptCreate
 
 
-def _validate_foreign_keys(db: Session, data: ReceiptCreate) -> None:
+def _get_referenced_products(db: Session, data: ReceiptCreate) -> dict[int, Product]:
     product_ids = {item.product_id for item in data.items if item.product_id is not None}
-    category_ids = {item.category_id for item in data.items if item.category_id is not None}
+    products: dict[int, Product] = {}
 
     for product_id in product_ids:
-        if db.get(Product, product_id) is None:
+        product = db.get(Product, product_id)
+        if product is None:
             raise ValueError(f"product_id does not exist: {product_id}")
+        products[product_id] = product
 
+    return products
+
+
+def _validate_category_ids(db: Session, data: ReceiptCreate) -> None:
+    category_ids = {item.category_id for item in data.items if item.category_id is not None}
     for category_id in category_ids:
         if db.get(AccountingCategory, category_id) is None:
             raise ValueError(f"category_id does not exist: {category_id}")
 
 
 def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
-    _validate_foreign_keys(db, data)
+    products = _get_referenced_products(db, data)
+    _validate_category_ids(db, data)
 
     items_total = sum(item.line_total for item in data.items)
     adjustment_amount = data.total_amount - items_total
@@ -33,12 +41,19 @@ def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
     )
 
     for item_data in data.items:
+        product = products.get(item_data.product_id) if item_data.product_id is not None else None
+        normalized_name = item_data.normalized_name
+        category_id = item_data.category_id
+        if product is not None:
+            normalized_name = normalized_name or product.name
+            category_id = category_id or product.default_category_id
+
         receipt.items.append(
             ReceiptItem(
                 product_id=item_data.product_id,
-                category_id=item_data.category_id,
+                category_id=category_id,
                 raw_name=item_data.raw_name,
-                normalized_name=item_data.normalized_name,
+                normalized_name=normalized_name,
                 purchased_quantity=item_data.purchased_quantity,
                 purchased_unit=item_data.purchased_unit,
                 base_quantity=item_data.base_quantity,

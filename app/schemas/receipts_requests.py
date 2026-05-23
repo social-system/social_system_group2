@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.common.date import parse_yyyymmdd
 
@@ -13,6 +13,8 @@ def _blank_to_none(value: str | None) -> str | None:
 
 
 class ReceiptItemCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     raw_name: str = Field(min_length=1, max_length=255)
     normalized_name: str | None = Field(default=None, max_length=255)
     product_id: int | None = None
@@ -43,7 +45,7 @@ class ReceiptItemCreate(BaseModel):
         if not self.is_inventory_target:
             return self
 
-        if self.normalized_name is None:
+        if self.normalized_name is None and self.product_id is None:
             raise ValueError("normalized_name is required for inventory target items")
         if self.base_quantity is None:
             raise ValueError("base_quantity is required for inventory target items")
@@ -54,6 +56,8 @@ class ReceiptItemCreate(BaseModel):
 
 
 class ReceiptCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     purchased_at: int
     store_name: str | None = Field(default=None, max_length=255)
     total_amount: int = Field(ge=0)
