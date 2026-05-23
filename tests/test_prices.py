@@ -1,19 +1,32 @@
 from datetime import date, timedelta
 
 from app.common.date import format_yyyymmdd
-from app.receipts.models import Product
+from app.receipts.models import Product, ProductAlias
+from app.services.product_normalization import normalize_product_key
 
 
 def make_product(db_session, *, name: str = "egg", unit: str = "個") -> Product:
     product = Product(
         name=name,
-        name_key=name,
+        name_key=normalize_product_key(name),
         default_base_unit=unit,
         is_inventory_target=True,
     )
     db_session.add(product)
     db_session.commit()
     return product
+
+
+def make_alias(db_session, *, product: Product, alias_name: str) -> ProductAlias:
+    alias = ProductAlias(
+        product_id=product.id,
+        alias_name=alias_name,
+        alias_key=normalize_product_key(alias_name),
+        source="seed",
+    )
+    db_session.add(alias)
+    db_session.commit()
+    return alias
 
 
 def make_receipt_payload(
@@ -192,6 +205,28 @@ def test_cheapest_price_excludes_receipts_outside_period(client, db_session):
     assert response.json()["cheapest"]["store_name"] == "current store"
 
 
+def test_cheapest_price_does_not_mix_other_product_id(client, db_session):
+    target = make_product(db_session, name="egg")
+    other = make_product(db_session, name="milk", unit="ml")
+    create_receipt(
+        client,
+        product_id=other.id,
+        store_name="other product cheap store",
+        line_total=1,
+    )
+    create_receipt(
+        client,
+        product_id=target.id,
+        store_name="target product store",
+        line_total=300,
+    )
+
+    response = client.get(f"/prices/cheapest?product_id={target.id}")
+
+    assert response.status_code == 200
+    assert response.json()["cheapest"]["store_name"] == "target product store"
+
+
 def test_cheapest_price_returns_null_when_no_data(client, db_session):
     product = make_product(db_session)
 
@@ -204,3 +239,53 @@ def test_cheapest_price_returns_null_when_no_data(client, db_session):
         "period_days": 90,
         "cheapest": None,
     }
+
+
+def test_cheapest_price_returns_404_for_missing_product_id(client):
+    response = client.get("/prices/cheapest?product_id=999")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "product not found"
+
+
+def test_prepare_receipt_create_then_cheapest_price(client, db_session):
+    product = make_product(db_session, name="卵")
+    make_alias(db_session, product=product, alias_name="タマゴM 10コ")
+    prepare_response = client.post(
+        "/receipts/prepare",
+        json={
+            "status": "needs_confirmation",
+            "store_name": "サンプルスーパー",
+            "purchased_at": date.today().isoformat(),
+            "total_amount": 238,
+            "items": [
+                {
+                    "raw_name": "タマゴM 10コ",
+                    "normalized_name": "たまご",
+                    "purchased_quantity": 1,
+                    "purchased_unit": "パック",
+                    "base_quantity": 10,
+                    "base_unit": "個",
+                    "unit_price": 238,
+                    "line_total": 238,
+                    "is_inventory_target": True,
+                    "confidence": 0.82,
+                }
+            ],
+        },
+    )
+    assert prepare_response.status_code == 200
+    create_response = client.post("/receipts", json=prepare_response.json()["receipt"])
+    assert create_response.status_code == 201
+
+    response = client.get(f"/prices/cheapest?product_id={product.id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["product_id"] == product.id
+    assert body["product_name"] == "卵"
+    assert body["cheapest"]["store_name"] == "サンプルスーパー"
+    assert body["cheapest"]["price_per_base_unit"] == 23.8
+    assert body["cheapest"]["line_total"] == 238
+    assert body["cheapest"]["base_quantity"] == "10.00"
+    assert body["cheapest"]["base_unit"] == "個"
