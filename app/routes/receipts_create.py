@@ -4,13 +4,23 @@ from sqlalchemy.orm import Session
 from app.common.date import format_yyyymmdd
 from app.crud.receipts_create import create_receipt
 from app.db.session import get_db
+from app.schemas.receipts_prepare import ReceiptPrepareRequest, ReceiptPrepareResponse
 from app.schemas.receipts_requests import ReceiptCreate
 from app.schemas.receipts_responses import ReceiptSummaryResponse
+from app.services.receipts_prepare import prepare_receipt
 
 router = APIRouter(
     prefix="/receipts",
     tags=["receipts"],
 )
+
+
+@router.post("/prepare", response_model=ReceiptPrepareResponse)
+def post_receipt_prepare(
+    payload: ReceiptPrepareRequest,
+    db: Session = Depends(get_db),
+):
+    return prepare_receipt(db, payload)
 
 
 @router.post(
