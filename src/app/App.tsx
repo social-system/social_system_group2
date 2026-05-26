@@ -18,6 +18,7 @@ import { AddInventoryForm } from "./components/AddInventoryForm";
 import { AddRecipeForm } from "./components/AddRecipeForm";
 import { SettingsModal } from "./components/SettingsModal";
 import { PriceComparison } from "./components/PriceComparison";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 
 export interface PurchaseItem {
   name: string;
@@ -177,6 +178,7 @@ export default function App() {
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [showAddRecipe, setShowAddRecipe] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false);
 
   const [settings, setSettings] = useState<UserSettings>({
     staples: [],
@@ -185,10 +187,10 @@ export default function App() {
     isSetupComplete: false,
   });
 
-  // 初回起動時に設定モーダルを表示
+  // 初回起動時にウェルカムスクリーンを表示
   useEffect(() => {
     if (!settings.isSetupComplete) {
-      setShowSettings(true);
+      setShowWelcome(true);
     }
   }, []);
 
@@ -472,6 +474,14 @@ export default function App() {
             if (settings.isSetupComplete) {
               setShowSettings(false);
             }
+          }}
+        />
+      )}
+       {showWelcome && (
+        <WelcomeScreen
+          onStart={() => {
+            setShowWelcome(false);
+            setShowSettings(true);
           }}
         />
       )}
