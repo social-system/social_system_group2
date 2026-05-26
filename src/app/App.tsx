@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Camera,
   Receipt,
@@ -9,13 +9,11 @@ import {
   X,
   Trash2,
   Eye,
-  AlertTriangle,
   ShoppingCart,
   Loader2,
   Store,
 } from "lucide-react";
 import * as Tabs from "@radix-ui/react-tabs";
-import { useEffect } from "react";
 import { UniversalCamera } from "./components/UniversalCamera";
 import { ExpenseList } from "./components/ExpenseList";
 import { InventoryList } from "./components/InventoryList";
@@ -114,6 +112,21 @@ export const RecipeListCall = ({ recipes, onDelete, inventory, onSelectRecipe }:
   );
 };
 
+export interface ReceiptItemPayload {
+  id?: string;
+  raw_name: string;
+  normalized_name: string;
+  product_id: number | null;
+  category_id: number | null;
+  purchased_quantity: number;
+  purchased_unit: string;
+  base_quantity: number;
+  base_unit: string;
+  unit_price: number;
+  line_total: number;
+  is_inventory_target: boolean;
+}
+
 export interface Expense {
   id: string;
   amount: number;
@@ -121,6 +134,7 @@ export interface Expense {
   description: string;
   date: Date;
   imageUrl?: string;
+  items?: ReceiptItemPayload[];
 }
 
 export interface Recipe {
@@ -196,83 +210,82 @@ export default function App() {
     const targetDate = date instanceof Date ? date : new Date(date);
     return Number(targetDate.toISOString().split('T')[0].replace(/-/g, ''));
   };
-
-  // 1. 初回起動時の処理（ヘルスチェック、設定確認、家計簿読み込み）
   useEffect(() => {
-    const checkHealth = async () => {
-      try {
-        //const res = await fetch(`http://localhost:8000/`); 
-        const res = await fetch(kakeibo_URL); 
-        if (!res.ok) throw new Error(`HTTPエラー: ${res.status}`);
-        const data = await res.json();
-        console.log("【Health Check 成功】", data);
-      } catch (err) {
-        console.error("【Health Check 失敗】:", err);
-      }
-    };
-
-    //checkHealth();
-
     if (!settings.isSetupComplete) {
       setShowSettings(true);
     }
     fetchExpenses();
   }, []);
 
-  // 2. 家計簿・レシートデータの読み込み (GET /receipts 仕様に完全準拠)
+  // 取得した全レシート明細の `is_inventory_target` からフロントの在庫状態を完全同期するロジック
+  const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
+    const newInventory: InventoryItem[] = [];
+    allExpenses.forEach((exp) => {
+      if (exp.items && Array.isArray(exp.items)) {
+        exp.items.forEach((item) => {
+          if (item.is_inventory_target) {
+            newInventory.push({
+              id: item.id ? item.id.toString() : `${exp.id}-${item.raw_name}`,
+              name: item.normalized_name || item.raw_name,
+              quantity: item.base_quantity,
+              unit: item.base_unit || "個",
+              category: "食材在庫",
+            });
+          }
+        });
+      }
+    });
+    setInventory(newInventory);
+  };
+
+  // 家計簿・レシートデータの読み込み (サマリー取得後、個別詳細を並列マージ)
   const fetchExpenses = async () => {
     try {
-      //const res = await fetch(`http://localhost:8000/receipts`); 
       const res = await fetch(`${kakeibo_URL}/receipts`); 
       if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
-      const data = await res.json();
+      const summaryData = await res.json();
       
-      if (Array.isArray(data)) {
-        const mappedExpenses: Expense[] = data.map((item: any) => {
-          const dateStr = String(item.purchased_at);
-          const y = Number(dateStr.substring(0, 4));
-          const m = Number(dateStr.substring(4, 6)) - 1;
-          const d = Number(dateStr.substring(6, 8));
-          return {
-            id: item.id.toString(),
-            amount: item.total_amount,
-            category: "レシートデータ",
-            description: item.store_name || "店舗名未設定",
-            date: new Date(y, m, d)
-          };
-        });
-        setExpenses(mappedExpenses);
+      if (Array.isArray(summaryData)) {
+        const detailedExpenses: Expense[] = await Promise.all(
+          summaryData.map(async (item: any) => {
+            const dateStr = String(item.purchased_at);
+            const y = Number(dateStr.substring(0, 4));
+            const m = Number(dateStr.substring(4, 6)) - 1;
+            const d = Number(dateStr.substring(6, 8));
+            
+            let itemsPayload: ReceiptItemPayload[] = [];
+            try {
+              const detailRes = await fetch(`${kakeibo_URL}/receipts/${item.id}`);
+              if (detailRes.ok) {
+                const detailData = await detailRes.json();
+                itemsPayload = detailData.items || [];
+              }
+            } catch (err) {
+              console.error(`レシート詳細(id:${item.id})の取得に失敗しました`, err);
+            }
+
+            return {
+              id: item.id.toString(),
+              amount: item.total_amount,
+              category: "レシートデータ",
+              description: item.store_name || "店舗名未設定",
+              date: new Date(y, m, d),
+              items: itemsPayload
+            };
+          })
+        );
+        
+        setExpenses(detailedExpenses);
+        syncInventoryFromExpenses(detailedExpenses);
       }
     } catch (err) {
       console.error("読み込み失敗", err);
     }
   };
 
-  // 3. 手動家計簿追加（POST /receipts 仕様に完全準拠）
-  const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
+  // 共通のレシート登録用関数
+  const submitReceiptPayload = async (requestBody: any) => {
     try {
-      const requestBody = {
-        purchased_at: formatToYmdNumber(expense.date || new Date()),
-        store_name: expense.description || "手動登録店舗",
-        total_amount: Number(expense.amount),
-        items: [
-          {
-            raw_name: expense.description || "手動登録商品",
-            normalized_name: expense.category || "未分類",
-            product_id: 1,
-            category_id: 1,
-            purchased_quantity: 1,
-            purchased_unit: "個",
-            base_quantity: 1,
-            base_unit: "個",
-            unit_price: Number(expense.amount),
-            line_total: Number(expense.amount),
-            is_inventory_target: false 
-          }
-        ]
-      };
-
-      //const response = await fetch(`http://localhost:8000/receipts`, {
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -280,17 +293,36 @@ export default function App() {
       });
 
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
-
-      const resData = await response.json();
-      const newExpense = { 
-        ...expense, 
-        id: resData.id ? resData.id.toString() : Date.now().toString() 
-      };
-      setExpenses([newExpense, ...expenses]);
+      await fetchExpenses(); 
     } catch (err) {
-      console.error("家計簿データの送信に失敗しました:", err);
+      console.error("レシートデータの送信に失敗しました:", err);
       alert("サーバーへの保存に失敗しました。");
     }
+  };
+
+  // 手動家計簿追加
+  const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
+    const requestBody = {
+      purchased_at: formatToYmdNumber(expense.date || new Date()),
+      store_name: expense.description || "手動登録店舗",
+      total_amount: Number(expense.amount),
+      items: [
+        {
+          raw_name: expense.description || "手動登録商品",
+          normalized_name: expense.category || "未分類",
+          product_id: 1,
+          category_id: 1,
+          purchased_quantity: 1,
+          purchased_unit: "個",
+          base_quantity: 1,
+          base_unit: "個",
+          unit_price: Number(expense.amount),
+          line_total: Number(expense.amount),
+          is_inventory_target: false 
+        }
+      ]
+    };
+    await submitReceiptPayload(requestBody);
   };
 
   // 4. 家計簿・レシートデータ削除 (DELETE /receipts/{receipt_id} 仕様に完全準拠)
@@ -300,9 +332,10 @@ export default function App() {
       const response = await fetch(`${kakeibo_URL}/receipts/${id}`, {
         method: "DELETE",
       });
-
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
-      setExpenses(expenses.filter((e) => e.id !== id));
+      const updatedExpenses = expenses.filter((e) => e.id !== id);
+      setExpenses(updatedExpenses);
+      syncInventoryFromExpenses(updatedExpenses);
     } catch (err) {
       console.error("データの削除に失敗しました:", err);
       alert("サーバーからのデータ削除に失敗しました。");
@@ -315,55 +348,39 @@ export default function App() {
 
   // 5. 手動在庫追加 (POST /receipts 仕様に準拠させ、is_inventory_targetをtrueにする)
   const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
-    try {
-      const requestBody = {
-        purchased_at: formatToYmdNumber(new Date()),
-        store_name: "手動在庫追加",
-        total_amount: 0, 
-        items: [
-          {
-            raw_name: item.name,
-            normalized_name: item.name,
-            product_id: 1,
-            category_id: 1,
-            purchased_quantity: Number(item.quantity),
-            purchased_unit: item.unit || "個",
-            base_quantity: Number(item.quantity),
-            base_unit: item.unit || "個",
-            unit_price: 0,
-            line_total: 0,
-            is_inventory_target: true 
-          }
-        ]
-      };
-
-      const response = await fetch(`${kakeibo_URL}/receipts`, {
-      //const response = await fetch(`http://localhost:8000/receipts`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
-
-      const newItem = { ...item, id: Date.now().toString() };
-      setInventory([newItem, ...inventory]);
-    } catch (err) {
-      console.error("在庫データの送信に失敗しました:", err);
-      alert("サーバーへの保存に失敗しました。");
-    }
+    const requestBody = {
+      purchased_at: formatToYmdNumber(new Date()),
+      store_name: "手動在庫追加",
+      total_amount: 0, 
+      items: [
+        {
+          raw_name: item.name,
+          normalized_name: item.name,
+          product_id: 1,
+          category_id: 1,
+          purchased_quantity: Number(item.quantity),
+          purchased_unit: item.unit || "個",
+          base_quantity: Number(item.quantity),
+          base_unit: item.unit || "個",
+          unit_price: 0,
+          line_total: 0,
+          is_inventory_target: true 
+        }
+      ]
+    };
+    await submitReceiptPayload(requestBody);
   };
 
   // 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
   const deleteInventoryItemCall = async (id: string) => {
+    const receiptId = id.includes("-") ? id.split("-")[0] : id;
     try {
-      const response = await fetch(`${kakeibo_URL}/receipts/${id}`, {
-      //const response = await fetch(`http://localhost:8000/receipts/${id}`, {
+      const response = await fetch(`${kakeibo_URL}/receipts/${receiptId}`, {
         method: "DELETE",
       });
 
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
-      setInventory(inventory.filter((i) => i.id !== id));
+      await fetchExpenses();
     } catch (err) {
       console.error("在庫データの削除に失敗しました:", err);
       alert("サーバーからのデータ削除に失敗しました。");
@@ -516,61 +533,41 @@ export default function App() {
         console.warn("Recipe-Backでの在庫消費に失敗しました。家計簿の登録のみ続行します。");
       }
 
-      // 2. 家計簿側への支出記録処理
-      const response = await fetch(`${kakeibo_URL}/receipts`, {
-      //const response = await fetch(`http://localhost:8000/receipts`, {  
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          purchased_at: formatToYmdNumber(new Date()),
-          store_name: "AIレシピ適応調理",
-          total_amount: recipe.estimatedCost || 0,
-          items: [
-            {
-              raw_name: recipe.title || "AIレシピ料理",
-              normalized_name: recipe.title || "AIレシピ料理",
-              product_id: 1,
-              category_id: 1,
-              purchased_quantity: 1,
-              purchased_unit: "食",
-              base_quantity: 1,
-              base_unit: "食",
-              unit_price: recipe.estimatedCost || 0,
-              line_total: recipe.estimatedCost || 0,
-              is_inventory_target: false
-            }
-          ]
-        }),
+      // 2. 家計簿側への支出記録処理（共通関数を利用し再同期）
+      await submitReceiptPayload({
+        purchased_at: formatToYmdNumber(new Date()),
+        store_name: "AIレシピ適応調理",
+        total_amount: recipe.estimatedCost || 0,
+        items: [
+          {
+            raw_name: recipe.title || "AIレシピ料理",
+            normalized_name: recipe.title || "AIレシピ料理",
+            product_id: 1,
+            category_id: 1,
+            purchased_quantity: 1,
+            purchased_unit: "食",
+            base_quantity: 1,
+            base_unit: "食",
+            unit_price: recipe.estimatedCost || 0,
+            line_total: recipe.estimatedCost || 0,
+            is_inventory_target: false
+          }
+        ]
       });
-
-      if (!response.ok) throw new Error(`家計簿サーバーエラー: ${response.status}`);
-
-      // 3. フロントエンドの簡易的な在庫ステート更新
-      if (recipe.ingredients && recipe.ingredients.length > 0) {
-        setInventory(prevInventory => {
-          return prevInventory
-            .map(item => {
-              const isUsed = recipe.ingredients.some((ing) => 
-                ing.isInFridge && (item.name.toLowerCase().includes(ing.name.toLowerCase()) || ing.name.toLowerCase().includes(item.name.toLowerCase()))
-              );
-              if (isUsed) {
-                const nextQty = item.quantity - 1;
-                return { ...item, quantity: nextQty };
-              }
-              return item;
-            })
-            .filter(item => item.quantity > 0);
-        });
-      }
 
       alert("家計簿に追加し、バックエンドの冷蔵庫在庫を消費しました！");
       handleCloseModal();
       setActiveTab('expenses');
-      fetchExpenses();
     } catch (err) {
       console.error("レシピの適応に失敗しました:", err);
       alert("レシピの適応処理に失敗しました。");
     }
+  };
+
+  // カメラからの読み込み成功コールバックをリフレッシュ（二重登録を防ぎ再読み込みのみを担当）
+  const handleCameraCaptureComplete = async () => {
+    setShowCamera(false);
+    await fetchExpenses();
   };
 
   return (
@@ -844,15 +841,7 @@ export default function App() {
 
       {showCamera && (
         <UniversalCamera
-          onCapture={async (imageUrl, extractedData) => {
-            setShowCamera(false);
-            if (extractedData.expense) {
-              addExpenseCall(extractedData.expense);
-            }
-            if (extractedData.inventoryItems) {
-              extractedData.inventoryItems.forEach((item) => addInventoryItemCall(item));
-            }
-          }}
+          onCapture={handleCameraCaptureComplete}
           onClose={() => setShowCamera(false)}
         />
       )}

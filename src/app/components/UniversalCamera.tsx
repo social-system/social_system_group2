@@ -1,23 +1,21 @@
 import { useRef, useState, useEffect } from 'react';
 import { Camera, X, Check, Sparkles } from 'lucide-react';
-import type { Expense, InventoryItem } from '../App';
+import type { InventoryItem } from '../App';
 
 
 //const kakeibo_URL = "http://localhost:8000";
 const kakeibo_URL = "https://social-system-group2.onrender.com";
 
 
-//const recipe_URL = "http://localhost:8080";
-const recipe_URL = "https://social-system-group2-1.onrender.com";
-
-
 interface ExtractedData {
-  expense?: Omit<Expense, 'id'>;
-  inventoryItems?: Omit<InventoryItem, 'id'>[];
+  store_name?: string;
+  purchased_at?: string;
+  total_amount?: number;
+  items?: any[];
 }
 
 interface UniversalCameraProps {
-  onCapture: (imageUrl: string, extractedData: ExtractedData) => void;
+  onCapture: () => void;
   onClose: () => void;
 }
 
@@ -65,91 +63,44 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
     }
   };
 
-  // OCR/画像認識関数 (API 仕様書のマッピングロジックに修正)
   const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
     try {
       const res = await fetch(imageUrl);
       const blob = await res.blob();
       const formData = new FormData();
-      
-      //formData.append("upload_file", blob, "capture.jpg");
       formData.append("file", blob, "capture.jpg");
 
       try {
-        //const response = await fetch(`http://localhost:8000/ocr/receipts/extract`, {
         const response = await fetch(`${kakeibo_URL}/ocr/receipts/extract`, {
-
           method: "POST",
           body: formData,
         });
 
         if (!response.ok) {
-          console.error("--- サーバー解析エラー発生 (ステータス: " + response.status + ") ---");
-          return getMockData(imageUrl, "サーバー出力エラー時のモックデータ");
+          console.error("--- サーバー解析エラー発生 ---");
+          return getMockData();
         }
 
         const data = await response.json();
-        const apiItems = data.items || [];
-        
-// 💡 【修正】0円問題を解決！
-        const totalAmount = Number(data.total_amount) || apiItems.reduce((sum: number, item: any) => {
-          return sum + (Number(item.line_total) || Number(item.unit_price) || 0);
-        }, 0);
-
-        // 💡 【修正】家計簿データに、正しい「内訳（items）」の配列も含めて渡すようにします
-        // これにより、家計簿タブ側でレシートごとの内訳・明細が正しく表示されるようになります
-        const expense = apiItems.length > 0 ? {
-          amount: totalAmount,
-          category: "レシートデータ",
-          description: data.store_name || "店舗名未設定",
-          date: new Date(),
-          items: apiItems.map((item: any) => ({
-            name: item.normalized_name || item.raw_name || "不明な商品",
-            price: Number(item.line_total) || Number(item.unit_price) || 0,
-            quantity: Number(item.purchased_quantity) || Number(item.quantity) || 1
-          }))
-        } : undefined;
-
-        // 💡 【修正】在庫管理（冷蔵庫）の明細も、キー名をバックエンドの仕様（normalized_name, purchased_quantity）に完全一致させます
-        const inventoryItems = apiItems
-          .filter((item: any) => {
-            const name = String(item.normalized_name || item.raw_name || "");
-            return !name.includes("割引") && !name.includes("値引き");
-          })
-          .map((item: any) => ({
-            name: item.normalized_name || item.raw_name || "不明な食材",
-            quantity: Number(item.purchased_quantity) || Number(item.quantity) || 1,
-            unit: item.purchased_unit || item.base_unit || "個",
-            category: "食材",
-          }));
-
-        return {
-          expense,
-          inventoryItems,
-        };
+        return data as ExtractedData;
 
       } catch (networkError) {
-        console.error("--- サーバー未起動または通信不能を検知 ---");
-        return getMockData(imageUrl, "サーバー起動エラー時のモックデータ");
+        console.error("--- サーバー通信不能を検知 ---");
+        return getMockData();
       }
-
     } catch (err) {
       console.error("解析失敗:", err);
-      return {};
+      return getMockData();
     }
   };
 
-  const getMockData = (imageUrl: string, description: string): ExtractedData => ({
-    expense: {
-      amount: 1280,
-      category: 'レシートデータ',
-      description: 'サンプルスーパー',
-      date: new Date(),
-      imageUrl,
-    },
-    inventoryItems: [
-      { name: 'デバッグ用牛乳', quantity: 1, unit: '本', category: '食品', imageUrl },
-      { name: 'デバッグ用卵', quantity: 10, unit: '個', category: '食品', imageUrl },
+  const getMockData = (): ExtractedData => ({
+    store_name: 'サンプルスーパー',
+    purchased_at: new Date().toISOString().split('T')[0],
+    total_amount: 1280,
+    items: [
+      { raw_name: 'プレミアム牛乳', normalized_name: '牛乳', purchased_quantity: 1, purchased_unit: '本', unit_price: 280, line_total: 280 },
+      { raw_name: '新鮮たまご 10コ', normalized_name: '卵', purchased_quantity: 1, purchased_unit: 'パック', unit_price: 250, line_total: 250 },
     ],
   });
 
@@ -176,82 +127,99 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
   // 登録ボタンを押した時の処理（POST /receipts の入れ子構造に完全準拠）
   const handleConfirmCall = async () => {
     if (!capturedImage) return;
+    setIsProcessing(true);
 
     try {
-      // YYYYMMDD形式の数値
-      const todayDate = Number(new Date().toISOString().split('T')[0].replace(/-/g, ''));
-
-      // 1. トップレベルの基本情報設定（OCRから店舗名や金額があれば使う、なければデフォルト値）
-      const totalAmount = extractedData.expense ? Number(extractedData.expense.amount) : 0;
-      const storeName = extractedData.expense ? extractedData.expense.description : "カメラ登録店舗";
-
-      // 2. 入れ子にする明細アイテム (items) 配列の構築
-      const itemsPayload = [];
-
-      if (extractedData.inventoryItems && extractedData.inventoryItems.length > 0) {
-        // 在庫品が検出されている場合は明細として詰め込む
-        extractedData.inventoryItems.forEach((item) => {
-          itemsPayload.push({
-            raw_name: item.name || "不明な商品",
-            normalized_name: item.name || "不明な商品",
-            product_id: 1,
-            category_id: 1,
-            purchased_quantity: Number(item.quantity) || 1,
-            purchased_unit: item.unit || "個",
-            base_quantity: Number(item.quantity) || 1,
-            base_unit: item.unit || "個",
-            unit_price: 0, 
-            line_total: 0,
-            is_inventory_target: true // 食材・在庫品なので自動で在庫ロットへ反映
-          });
-        });
-      } else {
-        // 在庫品は無いが金額だけがある（一般的なレシート）場合のフォールバック明細
-        itemsPayload.push({
-          raw_name: "レシート一括品目",
-          normalized_name: "レシート一括品目",
-          product_id: 1,
-          category_id: 1,
-          purchased_quantity: 1,
-          purchased_unit: "点",
-          base_quantity: 1,
-          base_unit: "点",
-          unit_price: totalAmount,
-          line_total: totalAmount,
-          is_inventory_target: false // 通常の一般経費
-        });
+// 1. 日付を App.tsx がクラッシュしない数値型(YYYYMMDD)にクレンジング
+      let dateNum = Number(new Date().toISOString().split('T')[0].replace(/-/g, ''));
+      if (extractedData.purchased_at) {
+        const cleanDate = extractedData.purchased_at.replace(/-/g, '');
+        if (!isNaN(Number(cleanDate)) && cleanDate.length === 8) {
+          dateNum = Number(cleanDate);
+        }
       }
-
-      // 仕様書の POST /receipts リクエストボディの組み立て
-      const requestBody = {
-        purchased_at: todayDate,
-        store_name: storeName,
-        total_amount: totalAmount,
-        items: itemsPayload
+      // 1. まず仮データを解決するために /receipts/prepare を呼び出す
+      const prepareBodyold = {
+        status: "needs_confirmation",
+        store_name: extractedData.store_name || "カメラ登録店舗",
+        purchased_at: extractedData.purchased_at || new Date().toISOString().split('T')[0],
+        total_amount: extractedData.total_amount || 0,
+        items: extractedData.items?.map((item: any) => ({
+          raw_name: item.raw_name || "不明な商品",
+          normalized_name: item.normalized_name || item.raw_name || "不明な商品",
+          category_name: "食費",
+          purchased_quantity: Number(item.purchased_quantity) || 1,
+          purchased_unit: item.purchased_unit || "個",
+          base_quantity: Number(item.purchased_quantity) || 1,
+          base_unit: item.purchased_unit || "個",
+          unit_price: Number(item.unit_price) || 0,
+          line_total: Number(item.line_total) || 0,
+          is_inventory_target: true,
+          confidence: 1.0,
+          warnings: []
+        })) || [],
+        warnings: []
       };
 
-      // 3. バックエンドへ確定データを1つのリクエストとして送信
-      const response = await fetch(`${kakeibo_URL}/receipts`, {
-      //const response = await fetch(`http://localhost:8000/receipts`, {  
+// 2. 仕様に準拠したリクエストボディの作成
+      const prepareBody = {
+        status: "needs_confirmation",
+        store_name: extractedData.store_name || "カメラ登録店舗",
+        purchased_at: dateNum, // 数値型に統一
+        total_amount: Number(extractedData.total_amount) || 0,
+        items: extractedData.items?.map((item: any) => ({
+          raw_name: item.raw_name || "不明な商品",
+          normalized_name: item.normalized_name || item.raw_name || "不明な商品",
+          product_id: 1, 
+          category_id: 1, // 文字列(category_name)から仕様通りの数値(category_id)に修正
+          purchased_quantity: Number(item.purchased_quantity) || 1,
+          purchased_unit: item.purchased_unit || "個",
+          base_quantity: Number(item.purchased_quantity) || 1,
+          base_unit: item.purchased_unit || "個",
+          unit_price: Number(item.unit_price) || 0,
+          line_total: Number(item.line_total) || 0,
+          is_inventory_target: true, // 在庫に自動同期させるフラグ
+          confidence: 1.0,
+          warnings: []
+        })) || [],
+        warnings: []
+      };
+
+      const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
+        body: JSON.stringify(prepareBody),
       });
 
-      if (!response.ok) {
-        throw new Error(`サーバーエラー: ${response.status}`);
-      }
+      if (!prepareResponse.ok) throw new Error("データの事前解決(prepare)に失敗しました。");
+      const prepareData = await prepareResponse.json();
 
-      const resData = await response.json();
-      alert(`確定レシートを登録しました！ (レシートID: ${resData.id})`);
-      
-      // 親コンポーネントへ引き渡し、カメラコンポーネントを終了
-      onCapture(capturedImage, extractedData);
+// レスポンス構造がネストしていても対応できる安全ガード
+      const finalReceiptPayload = prepareData.receipt || prepareData;
+
+      if (finalReceiptPayload) {
+        // 4. 本登録
+        const response = await fetch(`${kakeibo_URL}/receipts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(finalReceiptPayload),
+        });
+
+      if (!response.ok) throw new Error(`レシート確定エラー: ${response.status}`);
+              const resData = await response.json();
+              
+              // 5. アラートのID表示が undefined になるのを防ぐフォールバック
+              const createdId = resData.id || resData.receipt_id || 'success';
+              alert(`確定レシートを登録しました！ (レシートID: ${createdId})`);
+            }
+
+      onCapture();
       stopCamera();
-
     } catch (err) {
-      console.error("確定レシートの登録に失敗しました:", err);
-      alert("データベースへの登録に失敗しました。サーバーの接続状況を確認してください。");
+      console.error("登録エラー:", err);
+      alert("データベースへの登録に失敗しました。");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -293,29 +261,26 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
                   <div className="absolute inset-0 flex items-center justify-center rounded-lg bg-black/50">
                     <div className="text-center text-white">
                       <Sparkles className="mx-auto mb-2 size-12 animate-pulse" />
-                      <p className="font-medium">画像を解析中...</p>
+                      <p className="font-medium">データを同期処理中...</p>
                     </div>
                   </div>
                 )}
-
                 {!isProcessing && (
                   <div className="mt-4 rounded-lg bg-white p-4">
-                    <h3 className="mb-2 font-bold text-gray-800">検出された情報:</h3>
-                    {extractedData.expense && (
-                      <div className="mb-3 rounded-lg bg-blue-50 p-3">
-                        <p className="mb-1 text-sm font-medium text-blue-900">💰 支出概要</p>
-                        <p className="text-gray-700">
-                          ¥{extractedData.expense.amount.toLocaleString()} - {extractedData.expense.description}
-                        </p>
-                      </div>
-                    )}
-                    {extractedData.inventoryItems && extractedData.inventoryItems.length > 0 && (
+                    <h3 className="mb-2 font-bold text-gray-800">解析・プレビュー情報:</h3>
+                    <div className="mb-3 rounded-lg bg-blue-50 p-3">
+                      <p className="mb-1 text-sm font-medium text-blue-900">💰 店舗・金額概要</p>
+                      <p className="text-gray-700">
+                        {extractedData.store_name || "サンプルスーパー"} - ¥{(extractedData.total_amount || 0).toLocaleString()}
+                      </p>
+                    </div>
+                    {extractedData.items && extractedData.items.length > 0 && (
                       <div className="rounded-lg bg-green-50 p-3">
-                        <p className="mb-2 text-sm font-medium text-green-900">📦 内訳（明細アイテム）</p>
+                        <p className="mb-2 text-sm font-medium text-green-900">📦 購入アイテム明細</p>
                         <div className="space-y-1">
-                          {extractedData.inventoryItems.map((item, idx) => (
+                          {extractedData.items.map((item, idx) => (
                             <p key={idx} className="text-sm text-gray-700">
-                              • {item.name} - {item.quantity}{item.unit}
+                              • {item.normalized_name || item.raw_name} - ¥{item.line_total} ({item.purchased_quantity}{item.purchased_unit || "個"})
                             </p>
                           ))}
                         </div>
