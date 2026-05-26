@@ -25,7 +25,9 @@ import { SettingsModal } from "./components/SettingsModal";
 
 
 //const kakeibo_URL = "http://localhost:8000";
-const kakeibo_URL = "https://social-system-group2.onrender.com";
+//const kakeibo_URL = "https://social-system-group2.onrender.com";
+const kakeibo_URL = "https://social-system-group2-3.onrender.com";
+
 
 
 //const recipe_URL = "http://localhost:8080";

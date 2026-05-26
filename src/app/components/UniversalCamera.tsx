@@ -4,8 +4,8 @@ import type { InventoryItem } from '../App';
 
 
 //const kakeibo_URL = "http://localhost:8000";
-const kakeibo_URL = "https://social-system-group2.onrender.com";
-
+//const kakeibo_URL = "https://social-system-group2.onrender.com";
+const kakeibo_URL = "https://social-system-group2-3.onrender.com";
 
 interface ExtractedData {
   store_name?: string;
