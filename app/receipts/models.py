@@ -16,6 +16,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from app.common.product_alias_sources import DEFAULT_ALIAS_SOURCE
 from app.db.session import Base
 
 
@@ -148,7 +149,11 @@ class ProductAlias(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     alias_name: Mapped[str] = mapped_column(String(255), nullable=False)
     alias_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
-    source: Mapped[str] = mapped_column(String(50), nullable=False, default="manual")
+    source: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False,
+        default=DEFAULT_ALIAS_SOURCE,
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime,
@@ -189,3 +194,65 @@ class ProductUnitConversion(Base):
     )
 
     product: Mapped["Product"] = relationship(back_populates="unit_conversions")
+
+
+class ReceiptPrepareMetric(Base):
+    __tablename__ = "receipt_prepare_metrics"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    prepare_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    total_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    unresolved_item_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    inventory_base_quantity_missing_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+
+class ReceiptPrepareUnresolvedName(Base):
+    __tablename__ = "receipt_prepare_unresolved_names"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    raw_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    raw_name_key: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )
+
+
+class ProductAliasConflictEvent(Base):
+    __tablename__ = "product_alias_conflict_events"
+    __table_args__ = (
+        UniqueConstraint(
+            "alias_key",
+            "requested_product_id",
+            "existing_product_id",
+            name="uq_product_alias_conflict_event",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    alias_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    requested_product_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    existing_product_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        server_default=func.now(),
+        nullable=False,
+    )

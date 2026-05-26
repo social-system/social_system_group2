@@ -13,12 +13,21 @@ def _katakana_to_hiragana(value: str) -> str:
     return "".join(chars)
 
 
+def _remove_ocr_noise_symbols(value: str) -> str:
+    return "".join(
+        char
+        for char in value
+        if unicodedata.category(char)[0] not in {"P", "S"}
+    )
+
+
 def normalize_product_key(value: str | None) -> str | None:
     if value is None:
         return None
 
     normalized = unicodedata.normalize("NFKC", value).strip().lower()
     normalized = re.sub(r"\s+", "", normalized)
+    normalized = _remove_ocr_noise_symbols(normalized)
     normalized = _katakana_to_hiragana(normalized)
 
     return normalized or None

@@ -15,6 +15,20 @@ from app.schemas.receipts_prepare import (
     ReceiptPrepareResponse,
 )
 from app.services.product_resolution import ProductResolutionInput, resolve_product
+from app.services.product_unit_conversion import (
+    convert_to_base_quantity,
+    find_product_unit_conversion,
+    normalize_unit,
+)
+
+
+AMBIGUOUS_PURCHASED_UNITS = {"個", "本", "袋", "パック"}
+QUANTITY_CONFIRMATION_ISSUES = {
+    "unit_conversion_missing",
+    "ambiguous_quantity",
+    "base_quantity_missing",
+    "base_unit_missing",
+}
 
 
 def _blank_to_none(value: str | None) -> str | None:
@@ -76,6 +90,7 @@ def _candidate_response(candidate) -> PreparedProductCandidate:
 
 
 def _item_issues(
+    db: Session,
     *,
     item: ReceiptPrepareItemRequest,
     prepared_item: PreparedReceiptItem,
@@ -102,8 +117,29 @@ def _item_issues(
             issues.append("inventory_target_without_normalized_name")
         if prepared_item.base_quantity is None:
             issues.append("inventory_target_without_base_quantity")
+            issues.append("base_quantity_missing")
         if _blank_to_none(prepared_item.base_unit) is None:
             issues.append("inventory_target_without_base_unit")
+            issues.append("base_unit_missing")
+
+        if prepared_item.base_quantity is None:
+            normalized_purchased_unit = normalize_unit(prepared_item.purchased_unit)
+            normalized_base_unit = normalize_unit(prepared_item.base_unit)
+
+            if item.purchased_quantity is None or normalized_purchased_unit is None:
+                issues.append("ambiguous_quantity")
+            elif prepared_item.product_id is not None and normalized_base_unit is not None:
+                if normalized_purchased_unit != normalized_base_unit:
+                    conversion = find_product_unit_conversion(
+                        db,
+                        product_id=prepared_item.product_id,
+                        from_unit=prepared_item.purchased_unit,
+                        to_unit=prepared_item.base_unit,
+                    )
+                    if conversion is None:
+                        issues.append("unit_conversion_missing")
+                        if normalized_purchased_unit in AMBIGUOUS_PURCHASED_UNITS:
+                            issues.append("ambiguous_quantity")
 
     return issues
 
@@ -141,6 +177,16 @@ def prepare_receipt(
         base_unit = _blank_to_none(item.base_unit)
         if base_unit is None and resolution.default_base_unit is not None:
             base_unit = resolution.default_base_unit
+        purchased_unit = _blank_to_none(item.purchased_unit)
+        base_quantity = item.base_quantity
+        if base_quantity is None:
+            base_quantity = convert_to_base_quantity(
+                db,
+                product_id=resolution.product_id,
+                purchased_quantity=item.purchased_quantity,
+                purchased_unit=purchased_unit,
+                base_unit=base_unit,
+            )
 
         normalized_name = _blank_to_none(item.normalized_name)
         if resolution.product_name is not None:
@@ -152,8 +198,8 @@ def prepare_receipt(
             product_id=resolution.product_id,
             category_id=category_id,
             purchased_quantity=item.purchased_quantity,
-            purchased_unit=_blank_to_none(item.purchased_unit),
-            base_quantity=item.base_quantity,
+            purchased_unit=purchased_unit,
+            base_quantity=base_quantity,
             base_unit=base_unit,
             unit_price=item.unit_price,
             line_total=item.line_total,
@@ -162,6 +208,7 @@ def prepare_receipt(
         prepared_items.append(prepared_item)
 
         issues = _item_issues(
+            db,
             item=item,
             prepared_item=prepared_item,
             resolution_status=resolution.resolution_status,
@@ -181,6 +228,13 @@ def prepare_receipt(
         item_resolutions.append(item_resolution)
         if issues:
             unresolved_items.append(item_resolution)
+
+    if any(
+        issue in QUANTITY_CONFIRMATION_ISSUES
+        for item_resolution in item_resolutions
+        for issue in item_resolution.issues
+    ):
+        validation_issues.append("inventory_items_require_quantity_confirmation")
 
     return ReceiptPrepareResponse(
         receipt=PreparedReceipt(

@@ -138,6 +138,26 @@ DB API は OCR の信頼度や警告を保存しない。
 
 未解決商品に対してユーザーが商品を選択したら、フロントエンドは `POST /product-aliases` で alias を登録する。次回以降の `POST /receipts/prepare` では、同じ `alias_key` から `product_id` が解決される。
 
+## 自動登録ゲート
+
+人間の確認を最小化する場合でも、OCR 仮データを無条件に `POST /receipts` へ送らない。
+
+代わりに `POST /receipts/auto-create` を使う。この API は `POST /receipts/prepare` と同じ整形を行い、次のような安全条件を満たした場合だけ保存する。
+
+```text
+未解決商品がない
+validation_issues がない
+OCR warnings がない
+各明細の confidence が閾値以上
+在庫対象明細の product_id / base_quantity / base_unit が揃っている
+OCR metadata が review を要求していない
+total_amount と line_total 合計が一致する
+```
+
+条件を満たさない場合は保存せず、`auto_registration.reasons` に理由を返す。
+
+OCR API が `ocr_metadata` を返す場合、DB API はそれを確定データとして保存しない。自動登録可否の判断材料としてのみ使う。
+
 ## 最安店表示との接続
 
 `GET /prices/cheapest` は `receipt_items.product_id` が一致する購入履歴だけを対象にする。

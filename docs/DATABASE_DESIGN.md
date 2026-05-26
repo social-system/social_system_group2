@@ -62,6 +62,9 @@ accounting_categories
 products
 product_aliases
 product_unit_conversions
+receipt_prepare_metrics
+receipt_prepare_unresolved_names
+product_alias_conflict_events
 ```
 
 ## ER 概要
@@ -211,18 +214,32 @@ base_unit
 | `product_id` | Integer | yes | `products.id` |
 | `alias_name` | String(255) | yes | OCR やユーザー入力で出現した商品名 |
 | `alias_key` | String(255) | yes | 検索・照合用に正規化した別名。unique |
-| `source` | String(50) | yes | alias が作られた理由。例: `manual`, `seed`, `user_confirmed`, `ocr` |
+| `source` | String(50) | yes | alias が作られた理由。許可値は `user_confirmed`, `seed`, `admin`, `ocr_suggested` |
 | `is_active` | Boolean | yes | 無効化用フラグ |
 | `created_at` | DateTime | yes | 作成日時 |
 | `updated_at` | DateTime | yes | 更新日時 |
 
+### source の運用ルール
+
+| source | 意味 | 自動解決 | 候補検索 |
+| --- | --- | --- | --- |
+| `user_confirmed` | ユーザーが確認画面で選択したalias | 可 | 可 |
+| `seed` | 初期データ・テストデータとして安全に登録したalias | 可 | 可 |
+| `admin` | 管理者が確認して登録したalias | 可 | 可 |
+| `ocr_suggested` | OCRやAIが候補として推定しただけのalias | 不可 | 可 |
+
+`POST /receipts/prepare` の自動解決では、`alias_key` が完全一致し、`is_active = true` で、`source` が `user_confirmed`, `seed`, `admin` の alias だけを使う。
+
+`ocr_suggested` は候補検索にだけ使い、自動で `resolved` にしない。`is_active = false` の alias は、自動解決にも候補検索にも使わない。
+
 例:
 
-| alias_name | alias_key | product |
-| --- | --- | --- |
-| タマゴM 10コ | タマゴM10コ | 卵 |
-| 白たまご | 白たまご | 卵 |
-| 牛乳1000ml | 牛乳1000ml | 牛乳 |
+| alias_name | alias_key | source | product |
+| --- | --- | --- | --- |
+| タマゴM 10コ | たまごm10こ | user_confirmed | 卵 |
+| 白たまご | 白たまご | seed | 卵 |
+| 牛乳1000ml | 牛乳1000ml | admin | 牛乳 |
+| OCR候補名 | ocr候補名 | ocr_suggested | 候補検索のみ |
 
 ## product_unit_conversions
 
@@ -270,6 +287,55 @@ product_id, from_unit, to_unit
 卵 1パック = 10個
 納豆 1パック = 3個
 ヨーグルト 1パック = 400g
+```
+
+## receipt_prepare_metrics
+
+`POST /receipts/prepare` の運用指標を集約して保存する。
+
+このテーブルはレシート保存ではない。OCR 生 JSON、価格、店舗名、購入日、全明細は保存せず、効果測定に必要な件数だけを保存する。
+
+| カラム | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | Integer | yes | 主キー |
+| `prepare_count` | Integer | yes | `POST /receipts/prepare` 実行回数 |
+| `total_item_count` | Integer | yes | prepare で処理した明細数 |
+| `unresolved_item_count` | Integer | yes | `product_id` が解決できなかった明細数 |
+| `inventory_base_quantity_missing_count` | Integer | yes | 在庫対象で `base_quantity` が空の明細数 |
+| `created_at` | DateTime | yes | 作成日時 |
+| `updated_at` | DateTime | yes | 更新日時 |
+
+## receipt_prepare_unresolved_names
+
+`POST /receipts/prepare` で未解決だった `raw_name` を、正規化キー単位で集約する。
+
+| カラム | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | Integer | yes | 主キー |
+| `raw_name` | String(255) | yes | 未解決だった商品名の代表値 |
+| `raw_name_key` | String(255) | yes | 正規化したキー。unique |
+| `count` | Integer | yes | 出現回数 |
+| `last_seen_at` | DateTime | yes | 最終出現日時 |
+
+保存対象は未解決明細の `raw_name` だけであり、解決済み明細やレシート全体は保存しない。
+
+## product_alias_conflict_events
+
+alias 登録時に衝突した組み合わせを集約する。
+
+| カラム | 型 | 必須 | 説明 |
+| --- | --- | --- | --- |
+| `id` | Integer | yes | 主キー |
+| `alias_key` | String(255) | yes | 衝突した alias key |
+| `requested_product_id` | Integer | yes | 登録しようとした商品 ID |
+| `existing_product_id` | Integer | yes | 既に紐づいていた商品 ID |
+| `count` | Integer | yes | 衝突回数 |
+| `last_seen_at` | DateTime | yes | 最終発生日時 |
+
+unique 制約:
+
+```text
+alias_key, requested_product_id, existing_product_id
 ```
 
 ## SQLAlchemy モデル例

@@ -1,7 +1,7 @@
 from datetime import date
 
 from app.common.date import format_yyyymmdd
-from app.receipts.models import AccountingCategory, Product
+from app.receipts.models import AccountingCategory, Product, Receipt
 from app.services.product_normalization import normalize_product_key
 
 
@@ -65,6 +65,27 @@ def make_ocr_payload(
         ],
         "warnings": ["OCR warning"],
     }
+
+
+def make_auto_create_payload(**overrides) -> dict:
+    payload = make_ocr_payload(
+        store_name=overrides.pop("store_name", "自動登録スーパー"),
+        **overrides,
+    )
+    payload["auto_register_enabled"] = True
+    payload["warnings"] = []
+    payload["items"][0]["warnings"] = []
+    payload["items"][0]["confidence"] = 0.95
+    payload["items"][0]["ocr_metadata"] = {
+        "field_confidence": {
+            "raw_name": 0.98,
+            "line_total": 0.97,
+            "purchased_quantity": 0.95,
+        },
+        "auto_register_candidate": True,
+        "needs_review_reasons": [],
+    }
+    return payload
 
 
 def prepare_and_create_receipt(client, payload: dict) -> tuple[dict, dict]:
@@ -188,3 +209,119 @@ def test_unresolved_item_alias_learning_and_price_exclusion(client, db_session):
     assert body["item_resolutions"][0]["resolution_status"] == "resolved"
     assert body["item_resolutions"][0]["resolution_source"] == "normalized_name_alias"
     assert body["unresolved_items"] == []
+
+
+def test_auto_create_creates_receipt_when_ocr_payload_is_safe(client, db_session):
+    category = make_category(db_session)
+    product = make_product(
+        db_session,
+        name="卵",
+        unit="個",
+        category_id=category.id,
+    )
+    alias_response = client.post(
+        "/product-aliases",
+        json={
+            "alias_name": "タマゴM 10コ",
+            "product_id": product.id,
+            "source": "user_confirmed",
+        },
+    )
+    assert alias_response.status_code == 200
+
+    response = client.post("/receipts/auto-create", json=make_auto_create_payload())
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is True
+    assert body["receipt_id"] == body["summary"]["id"]
+    assert body["auto_registration"] == {
+        "eligible": True,
+        "reasons": [],
+        "min_item_confidence": 0.85,
+    }
+    assert body["receipt"]["items"][0]["product_id"] == product.id
+
+    receipt = db_session.get(Receipt, body["receipt_id"])
+    assert receipt is not None
+    assert receipt.source == "ocr_auto_registered"
+
+
+def test_auto_create_rejects_low_confidence_without_saving(client, db_session):
+    product = make_product(db_session, name="卵", unit="個")
+    alias_response = client.post(
+        "/product-aliases",
+        json={
+            "alias_name": "タマゴM 10コ",
+            "product_id": product.id,
+            "source": "user_confirmed",
+        },
+    )
+    assert alias_response.status_code == 200
+    payload = make_auto_create_payload()
+    payload["items"][0]["confidence"] = 0.5
+
+    response = client.post("/receipts/auto-create", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is False
+    assert body["receipt_id"] is None
+    assert "item_0_confidence_below_threshold" in body["auto_registration"]["reasons"]
+    assert db_session.query(Receipt).count() == 0
+
+
+def test_auto_create_rejects_metadata_review_reason_without_saving(client, db_session):
+    product = make_product(db_session, name="卵", unit="個")
+    alias_response = client.post(
+        "/product-aliases",
+        json={
+            "alias_name": "タマゴM 10コ",
+            "product_id": product.id,
+            "source": "user_confirmed",
+        },
+    )
+    assert alias_response.status_code == 200
+    payload = make_auto_create_payload()
+    payload["items"][0]["ocr_metadata"]["auto_register_candidate"] = False
+    payload["items"][0]["ocr_metadata"]["needs_review_reasons"] = [
+        "base quantity requires review"
+    ]
+
+    response = client.post("/receipts/auto-create", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is False
+    assert "item_0_metadata_blocks_auto_registration" in (
+        body["auto_registration"]["reasons"]
+    )
+    assert "item_0_needs_review:base quantity requires review" in (
+        body["auto_registration"]["reasons"]
+    )
+    assert db_session.query(Receipt).count() == 0
+
+
+def test_auto_create_respects_frontend_disabled_flag(client, db_session):
+    product = make_product(db_session, name="卵", unit="個")
+    alias_response = client.post(
+        "/product-aliases",
+        json={
+            "alias_name": "タマゴM 10コ",
+            "product_id": product.id,
+            "source": "user_confirmed",
+        },
+    )
+    assert alias_response.status_code == 200
+    payload = make_auto_create_payload()
+    payload["auto_register_enabled"] = False
+
+    response = client.post("/receipts/auto-create", json=payload)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created"] is False
+    assert body["receipt_id"] is None
+    assert body["receipt"]["items"][0]["product_id"] == product.id
+    assert "auto_registration_disabled" in body["auto_registration"]["reasons"]
+    assert db_session.query(Receipt).count() == 0

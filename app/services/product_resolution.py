@@ -3,6 +3,10 @@ from dataclasses import dataclass
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.common.product_alias_sources import (
+    AUTO_RESOLVE_ALIAS_SOURCES,
+    CANDIDATE_ALIAS_SOURCES,
+)
 from app.receipts.models import Product, ProductAlias
 from app.services.product_normalization import normalize_product_key
 
@@ -78,6 +82,7 @@ def _find_alias_product_by_key(db: Session, key: str | None) -> Product | None:
         .join(ProductAlias)
         .where(ProductAlias.alias_key == key)
         .where(ProductAlias.is_active.is_(True))
+        .where(ProductAlias.source.in_(AUTO_RESOLVE_ALIAS_SOURCES))
     )
     return db.scalars(statement).first()
 
@@ -126,6 +131,7 @@ def search_product_candidates(
     aliases = db.scalars(
         select(ProductAlias)
         .where(ProductAlias.is_active.is_(True))
+        .where(ProductAlias.source.in_(CANDIDATE_ALIAS_SOURCES))
         .order_by(ProductAlias.id)
     ).all()
     for alias in aliases:
