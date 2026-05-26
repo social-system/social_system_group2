@@ -1,124 +1,124 @@
-# Receipt OCR API
+# レシートOCR API
 
-レシート画像を受け取り、フロントエンドの確認画面に表示するための OCR 候補データを返す FastAPI アプリケーションです。
+レシート画像を受け取り、フロントエンドの確認画面に表示するためのOCR候補データを返すFastAPIアプリケーションです。
 
-返却データは、ユーザー確認前の一時的な候補です。このリポジトリは DB 登録、database API 呼び出し、在庫反映、レシピ提案、認証、ユーザー管理、画像保存、バックグラウンドジョブを担当しません。
+返却データは、ユーザー確認前の一時的な候補です。このリポジトリはデータベース登録、データベースAPI呼び出し、在庫反映、レシピ提案、認証、ユーザー管理、画像保存、バックグラウンドジョブを担当しません。
 
-## Scope
+## 対象範囲
 
-この API が担当すること:
+このAPIが担当すること:
 
 - レシート画像の入力検証
-- Gemini による画像読み取り
-- OpenAI Structured Outputs による厳密な JSON 正規化
-- Pydantic による最終レスポンス検証
+- Geminiによる画像読み取り
+- OpenAI Structured Outputsによる厳密なJSON正規化
+- Pydanticによる最終レスポンス検証
 - フロントエンド確認用の候補データ返却
 
-この API が担当しないこと:
+このAPIが担当しないこと:
 
 - レシートや明細のデータベース登録
-- database API / accounting API の呼び出し
+- データベースAPI / 会計APIの呼び出し
 - 在庫テーブルへの反映
 - レシピ提案
 - ユーザー認証・ユーザー管理
 - レシート画像の永続保存
 
-## Processing Flow
+## 処理の流れ
 
 ```text
-Receipt image
-  -> image validation
-  -> Gemini image reading
-  -> OpenAI Structured Outputs normalization
-  -> Pydantic validation
-  -> frontend confirmation response
+レシート画像
+  -> 画像検証
+  -> Geminiによる画像読み取り
+  -> OpenAI Structured Outputsによる正規化
+  -> Pydantic検証
+  -> フロントエンド確認用レスポンス
 ```
 
-外部モデル呼び出しは provider に分離されています。
+外部モデル呼び出しはプロバイダークラスに分離されています。
 
 ```text
-Route
+ルート
   -> ReceiptOcrService
       -> GeminiProvider
       -> OpenAIStructuredProvider
-      -> Pydantic validation
+      -> Pydantic検証
 ```
 
-## Requirements
+## 動作要件
 
-- Python 3.12+
+- Python 3.12以上
 - uv
 
-## Setup
+## セットアップ
 
 ```bash
 uv sync
 ```
 
-## Run
+## 起動
 
-API キーなしでアプリケーションを起動できます。
+APIキーなしでアプリケーションを起動できます。
 
 ```bash
 uv run uvicorn app.main:app --reload
 ```
 
-既定のローカル URL:
+既定のローカルURL:
 
 ```text
 http://127.0.0.1:8000
 ```
 
-FastAPI の自動ドキュメント:
+FastAPIの自動ドキュメント:
 
 - `http://127.0.0.1:8000/docs`
 - `http://127.0.0.1:8000/redoc`
 - `http://127.0.0.1:8000/openapi.json`
 
-## Configuration
+## 設定
 
-設定は OS 環境変数から `pydantic-settings` で読み込みます。このプロジェクトは `.env` ファイルを使いません。
+設定はOS環境変数から`pydantic-settings`で読み込みます。このプロジェクトは`.env`ファイルを使いません。
 
-アプリケーションの起動に `OPENAI_API_KEY` と `GEMINI_API_KEY` は不要です。実 provider の実行時だけ API キーが必要です。未設定のまま実 provider が呼ばれた場合、公開 API レスポンスでは不足しているキー名や値を出さず、`provider_not_configured` を返します。
+アプリケーションの起動に`OPENAI_API_KEY`と`GEMINI_API_KEY`は不要です。実プロバイダーの実行時だけAPIキーが必要です。未設定のまま実プロバイダーが呼ばれた場合、公開APIレスポンスでは不足しているキー名や値を出さず、`provider_not_configured`を返します。
 
-| Name | Startup required | Live provider required | Default | Description |
+| 名前 | 起動時に必須 | 実プロバイダー呼び出し時に必須 | 既定値 | 説明 |
 |---|---:|---:|---|---|
-| `GEMINI_API_KEY` | no | yes | none | Gemini API key |
-| `GEMINI_MODEL` | no | no | `gemini-2.5-flash` | Gemini model |
-| `OPENAI_API_KEY` | no | yes | none | OpenAI API key |
-| `OPENAI_MODEL` | no | no | `gpt-5.4-mini` | OpenAI model |
-| `MAX_IMAGE_BYTES` | no | no | `10485760` | Maximum image upload size |
-| `ALLOWED_IMAGE_MIME_TYPES` | no | no | `image/jpeg,image/png,image/webp` | Allowed upload MIME types. Comma-separated string is accepted |
-| `APP_ENV` | no | no | `local` | Application environment label |
-| `LOG_LEVEL` | no | no | `INFO` | Log level label |
+| `GEMINI_API_KEY` | いいえ | はい | なし | Gemini APIキー |
+| `GEMINI_MODEL` | いいえ | いいえ | `gemini-2.5-flash` | Geminiモデル |
+| `OPENAI_API_KEY` | いいえ | はい | なし | OpenAI APIキー |
+| `OPENAI_MODEL` | いいえ | いいえ | `gpt-5.4-mini` | OpenAIモデル |
+| `MAX_IMAGE_BYTES` | いいえ | いいえ | `10485760` | アップロード画像の最大バイト数 |
+| `ALLOWED_IMAGE_MIME_TYPES` | いいえ | いいえ | `image/jpeg,image/png,image/webp` | 許可する画像MIMEタイプ。カンマ区切り文字列を指定できます |
+| `APP_ENV` | いいえ | いいえ | `local` | アプリケーション環境名 |
+| `LOG_LEVEL` | いいえ | いいえ | `INFO` | ログレベル名 |
 
 秘密情報の扱い:
 
-- 実 API キーを README、テスト、ログ、コミット対象ファイルに書かない
+- 実APIキーをREADME、テスト、ログ、コミット対象ファイルに書かない
 - 環境変数の中身を出力しない
-- Codex に実 API キーを渡さない
-- Codex に実 Gemini / OpenAI API 呼び出しを実行させない
+- Codexに実APIキーを渡さない
+- Codexに実Gemini / OpenAI API呼び出しを実行させない
 
 ## API
 
-このアプリケーションが定義している API は次の 2 つです。
+このアプリケーションが定義しているAPIは次の2つです。
 
-| Method | Path | Purpose |
+| メソッド | パス | 用途 |
 |---|---|---|
 | `GET` | `/health` | ヘルスチェック |
-| `POST` | `/ocr/receipts/extract` | レシート画像 1 枚から OCR 候補データを抽出 |
+| `POST` | `/ocr/receipts/extract` | レシート画像1枚からOCR候補データを抽出 |
 
 ### GET /health
 
-ヘルスチェックです。provider や API キーの状態は確認しません。
+ヘルスチェックです。プロバイダーやAPIキーの状態は確認しません。
 
-Request:
+リクエスト:
 
 ```bash
 curl http://127.0.0.1:8000/health
 ```
 
-Response `200`:
+`200`レスポンス:
 
 ```json
 {
@@ -126,45 +126,45 @@ Response `200`:
 }
 ```
 
-Response fields:
+レスポンス項目:
 
-| Field | Type | Description |
+| 項目 | 型 | 説明 |
 |---|---|---|
-| `status` | string | 常に `ok` |
+| `status` | 文字列 | 常に`ok` |
 
 ### POST /ocr/receipts/extract
 
-レシート画像 1 枚から、フロントエンド確認用の候補データを抽出します。
+レシート画像1枚から、フロントエンド確認用の候補データを抽出します。
 
-この endpoint は `multipart/form-data` を受け付けます。成功時のレスポンスは確定データではなく、必ず `status = "needs_confirmation"` の候補データです。
+このエンドポイントは`multipart/form-data`を受け付けます。成功時のレスポンスは確定データではなく、必ず`status = "needs_confirmation"`の候補データです。
 
-Request:
+リクエスト:
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/ocr/receipts/extract" \
   -F "file=@sample_receipt.jpg;type=image/jpeg"
 ```
 
-Request fields:
+リクエスト項目:
 
-| Field | Type | Required | Description |
+| 項目 | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `file` | file | yes | レシート画像 |
+| `file` | ファイル | はい | レシート画像 |
 
-Accepted image MIME types:
+受け付ける画像MIMEタイプ:
 
 - `image/jpeg`
 - `image/png`
 - `image/webp`
 
-Maximum file size is controlled by `MAX_IMAGE_BYTES`. The default is `10485760` bytes.
+最大ファイルサイズは`MAX_IMAGE_BYTES`で制御します。既定値は`10485760`バイトです。
 
-Response `200` example:
+`200`レスポンス例:
 
 ```json
 {
   "status": "needs_confirmation",
-  "store_name": "Sample Store",
+  "store_name": "サンプルストア",
   "purchased_at": "2026-05-12",
   "total_amount": 1280,
   "items": [
@@ -205,81 +205,81 @@ Response `200` example:
 }
 ```
 
-Top-level response fields:
+トップレベルのレスポンス項目:
 
-| Field | Type | Required | Description |
+| 項目 | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `status` | string | yes | 成功時は常に `needs_confirmation` |
-| `store_name` | string or null | yes | レシート上の店舗名候補。読めない場合は `null` |
-| `purchased_at` | string or null | yes | 購入日候補。値がある場合は `YYYY-MM-DD` |
-| `total_amount` | integer or null | yes | 最終支払金額候補。値がある場合は `0` 以上 |
-| `items` | array | yes | 明細候補の配列 |
-| `warnings` | array of string | yes | レシート全体に対する非致命的な警告 |
+| `status` | 文字列 | はい | 成功時は常に`needs_confirmation` |
+| `store_name` | 文字列またはnull | はい | レシート上の店舗名候補。読めない場合は`null` |
+| `purchased_at` | 文字列またはnull | はい | 購入日候補。値がある場合は`YYYY-MM-DD` |
+| `total_amount` | 整数またはnull | はい | 最終支払金額候補。値がある場合は`0`以上 |
+| `items` | 配列 | はい | 明細候補の配列 |
+| `warnings` | 文字列の配列 | はい | レシート全体に対する非致命的な警告 |
 
-Item fields:
+明細項目:
 
-| Field | Type | Required | Description |
+| 項目 | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `raw_name` | string or null | yes | レシート上の商品名候補。過度に正規化しない値 |
-| `normalized_name` | string or null | yes | OCR が推定した商品名候補。DB の `products.name` と一致する保証はない |
-| `category_name` | string or null | yes | 会計カテゴリ名候補。カテゴリ ID は返さない |
-| `purchased_quantity` | number or null | yes | レシート上の購入単位の数量。値がある場合は `0` より大きい |
-| `purchased_unit` | string or null | yes | レシート上の購入単位 |
-| `base_quantity` | number or null | yes | アプリ内部基準単位への換算数量。値がある場合は `0` より大きい |
-| `base_unit` | string or null | yes | アプリ内部基準単位 |
-| `unit_price` | integer or null | yes | 単価候補。値がある場合は `0` 以上 |
-| `line_total` | integer or null | yes | 明細行金額候補。値がある場合は `0` 以上 |
-| `is_inventory_target` | boolean or null | yes | 在庫反映対象にするかどうかの候補 |
-| `confidence` | number or null | yes | 明細全体の信頼度候補。値がある場合は `0.0` から `1.0` |
-| `warnings` | array of string | yes | 明細行ごとの非致命的な警告 |
-| `ocr_metadata` | object | yes | OCR 後処理用のメタデータ |
+| `raw_name` | 文字列またはnull | はい | レシート上の商品名候補。過度に正規化しない値 |
+| `normalized_name` | 文字列またはnull | はい | OCRが推定した商品名候補。データベースの`products.name`と一致する保証はない |
+| `category_name` | 文字列またはnull | はい | 会計カテゴリ名候補。カテゴリIDは返さない |
+| `purchased_quantity` | 数値またはnull | はい | レシート上の購入単位の数量。値がある場合は`0`より大きい |
+| `purchased_unit` | 文字列またはnull | はい | レシート上の購入単位 |
+| `base_quantity` | 数値またはnull | はい | アプリ内部基準単位への換算数量。値がある場合は`0`より大きい |
+| `base_unit` | 文字列またはnull | はい | アプリ内部基準単位 |
+| `unit_price` | 整数またはnull | はい | 単価候補。値がある場合は`0`以上 |
+| `line_total` | 整数またはnull | はい | 明細行金額候補。値がある場合は`0`以上 |
+| `is_inventory_target` | 真偽値またはnull | はい | 在庫反映対象にするかどうかの候補 |
+| `confidence` | 数値またはnull | はい | 明細全体の信頼度候補。値がある場合は`0.0`から`1.0` |
+| `warnings` | 文字列の配列 | はい | 明細行ごとの非致命的な警告 |
+| `ocr_metadata` | オブジェクト | はい | OCR後処理用のメタデータ |
 
-`ocr_metadata` fields:
+`ocr_metadata`の項目:
 
-| Field | Type | Required | Description |
+| 項目 | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `field_confidence` | object | yes | 明細フィールドごとの信頼度候補 |
-| `auto_register_candidate` | boolean or null | yes | 自動登録候補として扱えるかどうかの候補。最終判断ではない |
-| `needs_review_reasons` | array of string | yes | 自動登録や確定前に確認が必要な理由 |
+| `field_confidence` | オブジェクト | はい | 明細フィールドごとの信頼度候補 |
+| `auto_register_candidate` | 真偽値またはnull | はい | 自動登録候補として扱えるかどうかの候補。最終判断ではない |
+| `needs_review_reasons` | 文字列の配列 | はい | 自動登録や確定前に確認が必要な理由 |
 
-`field_confidence` fields:
+`field_confidence`の項目:
 
-| Field | Type |
+| 項目 | 型 |
 |---|---|
-| `raw_name` | number or null |
-| `normalized_name` | number or null |
-| `category_name` | number or null |
-| `purchased_quantity` | number or null |
-| `purchased_unit` | number or null |
-| `base_quantity` | number or null |
-| `base_unit` | number or null |
-| `unit_price` | number or null |
-| `line_total` | number or null |
-| `is_inventory_target` | number or null |
+| `raw_name` | 数値またはnull |
+| `normalized_name` | 数値またはnull |
+| `category_name` | 数値またはnull |
+| `purchased_quantity` | 数値またはnull |
+| `purchased_unit` | 数値またはnull |
+| `base_quantity` | 数値またはnull |
+| `base_unit` | 数値またはnull |
+| `unit_price` | 数値またはnull |
+| `line_total` | 数値またはnull |
+| `is_inventory_target` | 数値またはnull |
 
-All `field_confidence` values must be `0.0` to `1.0` when present.
+すべての`field_confidence`値は、値がある場合`0.0`から`1.0`です。
 
-Validation rules:
+検証ルール:
 
-- Unknown values should be returned as `null`, not guessed values
-- Unknown object keys are rejected
-- `purchased_at` must be `YYYY-MM-DD` when present
-- `total_amount`, `unit_price`, and `line_total` must be `0` or greater when present
-- `purchased_quantity` and `base_quantity` must be greater than `0` when present
-- `confidence` and field-level confidence values must be between `0.0` and `1.0` when present
+- 不明な値は推測せず`null`にする
+- 未定義のオブジェクトキーは拒否される
+- `purchased_at`は、値がある場合`YYYY-MM-DD`であること
+- `total_amount`、`unit_price`、`line_total`は、値がある場合`0`以上であること
+- `purchased_quantity`と`base_quantity`は、値がある場合`0`より大きいこと
+- `confidence`とフィールド別信頼度は、値がある場合`0.0`から`1.0`であること
 
-Important API behavior:
+重要なAPI挙動:
 
-- This API does not register data in a database
-- This API does not call the database API or accounting API
-- This API does not return `product_id`, `category_id`, `receipt_id`, or `receipt_item_id`
-- `normalized_name` is only an OCR-estimated product-name candidate
-- Final ID resolution, correction, and database registration belong outside this service
-- Total amount and item sum mismatch does not fail the request; the service adds one warning when it can detect the mismatch
+- このAPIはデータベースに登録しない
+- このAPIはデータベースAPIまたは会計APIを呼び出さない
+- このAPIは`product_id`、`category_id`、`receipt_id`、`receipt_item_id`を返さない
+- `normalized_name`はOCRが推定した商品名候補である
+- 最終的なID解決、修正、データベース登録はこのサービスの外側の責務である
+- 合計金額と明細合計が一致しなくてもリクエストは失敗しない。サービス層が検出できる場合に警告を1つ追加する
 
-## Error Responses
+## エラーレスポンス
 
-Route-specific errors use this response shape:
+ルート固有のエラーは次の形で返します。
 
 ```json
 {
@@ -290,27 +290,27 @@ Route-specific errors use this response shape:
 }
 ```
 
-`POST /ocr/receipts/extract` errors:
+`POST /ocr/receipts/extract`のエラー:
 
-| Status | Code | Message | When |
+| ステータス | コード | メッセージ | 発生条件 |
 |---:|---|---|---|
-| 400 | `unsupported_image_type` | `Unsupported image type.` | `file` MIME type is not allowed |
-| 400 | `empty_file` | `File is empty.` | Uploaded file has zero bytes |
-| 413 | `image_too_large` | `Uploaded image is too large.` | Uploaded file exceeds `MAX_IMAGE_BYTES` |
-| 422 | `structured_output_invalid` | `Structured OCR output is invalid.` | Final structured data failed Pydantic validation |
-| 502 | `provider_not_configured` | `OCR provider is not configured.` | A real provider path was called without required configuration |
-| 502 | `gemini_provider_failed` | `Gemini provider failed.` | Gemini extraction failed |
-| 502 | `openai_provider_failed` | `OpenAI provider failed.` | OpenAI normalization failed |
-| 502 | `ocr_provider_failed` | `OCR provider failed.` | Generic provider failure |
-| 500 | `internal_server_error` | `Internal server error.` | Unexpected server error |
+| 400 | `unsupported_image_type` | `Unsupported image type.` | `file`のMIMEタイプが許可されていない |
+| 400 | `empty_file` | `File is empty.` | アップロードファイルが0バイト |
+| 413 | `image_too_large` | `Uploaded image is too large.` | アップロードファイルが`MAX_IMAGE_BYTES`を超えている |
+| 422 | `structured_output_invalid` | `Structured OCR output is invalid.` | 最終的な構造化データがPydantic検証に失敗した |
+| 502 | `provider_not_configured` | `OCR provider is not configured.` | 必要な設定がない状態で実プロバイダー経路が呼ばれた |
+| 502 | `gemini_provider_failed` | `Gemini provider failed.` | Geminiによる抽出に失敗した |
+| 502 | `openai_provider_failed` | `OpenAI provider failed.` | OpenAIによる正規化に失敗した |
+| 502 | `ocr_provider_failed` | `OCR provider failed.` | 汎用的なOCRプロバイダー失敗 |
+| 500 | `internal_server_error` | `Internal server error.` | 想定外のサーバーエラー |
 
-FastAPI request validation errors, such as a missing `file` field, may use FastAPI's standard validation response.
+`file`項目がない場合など、FastAPIのリクエスト検証エラーはFastAPI標準の検証レスポンスになる場合があります。
 
-Public error responses must not expose API keys, environment variable values, uploaded image bytes, provider raw responses, or stack traces.
+公開エラーレスポンスでは、APIキー、環境変数の値、アップロード画像のバイト列、プロバイダーの生レスポンス、スタックトレースを公開しません。
 
-## Frontend Usage
+## フロントエンドでの利用
 
-ブラウザから送信する場合は `FormData` に `file` を入れて送ります。
+ブラウザから送信する場合は`FormData`に`file`を入れて送ります。
 
 ```ts
 const formData = new FormData();
@@ -324,7 +324,7 @@ const response = await fetch("http://127.0.0.1:8000/ocr/receipts/extract", {
 const result = await response.json();
 ```
 
-フロントエンドは OCR レスポンスを確定データとして扱わず、ユーザーが確認・修正できる画面に表示してください。
+フロントエンドはOCRレスポンスを確定データとして扱わず、ユーザーが確認・修正できる画面に表示してください。
 
 確認画面で扱う主な項目:
 
@@ -334,57 +334,57 @@ const result = await response.json();
 - 明細行
 - トップレベルの警告
 - 明細行ごとの警告
-- OCR metadata の信頼度と確認理由
+- OCRメタデータの信頼度と確認理由
 
-DB 登録前にフロントエンドまたは database API 側で確認すべき項目:
+データベース登録前にフロントエンドまたはデータベースAPI側で確認すべき項目:
 
 - `purchased_at`
 - `total_amount`
-- item `raw_name`
-- item `line_total`
-- item `is_inventory_target`
+- 明細の`raw_name`
+- 明細の`line_total`
+- 明細の`is_inventory_target`
 
 在庫対象品では、次の項目も確認対象です。
 
-- item `normalized_name`
-- item `purchased_quantity`
-- item `purchased_unit`
-- item `base_quantity`
-- item `base_unit`
+- 明細の`normalized_name`
+- 明細の`purchased_quantity`
+- 明細の`purchased_unit`
+- 明細の`base_quantity`
+- 明細の`base_unit`
 
-現在のアプリケーションコードには CORS 設定がありません。別オリジンのフロントエンドから直接呼び出す場合は、バックエンドに CORS 設定を追加するか、フロントエンド開発サーバーでプロキシしてください。
+現在のアプリケーションコードにはCORS設定がありません。別オリジンのフロントエンドから直接呼び出す場合は、バックエンドにCORS設定を追加するか、フロントエンド開発サーバーでプロキシしてください。
 
-## Human-Only Live Verification
+## 人間によるライブ検証
 
-Live provider verification is optional and must be performed by a human developer only. Pass API keys through OS environment variables for the current command or current shell only. Do not store keys in project files.
+実プロバイダーのライブ検証は任意であり、人間の開発者だけが実行してください。APIキーは現在のコマンドまたは現在のシェルのOS環境変数として渡し、プロジェクトファイルには保存しないでください。
 
-Example:
+例:
 
 ```bash
-OPENAI_API_KEY="<set-by-human>" \
-GEMINI_API_KEY="<set-by-human>" \
+OPENAI_API_KEY="<人間が設定>" \
+GEMINI_API_KEY="<人間が設定>" \
 uv run uvicorn app.main:app --reload
 ```
 
-Then, from another terminal:
+別のターミナルから実行します。
 
 ```bash
 curl -X POST "http://127.0.0.1:8000/ocr/receipts/extract" \
   -F "file=@sample_receipt.jpg;type=image/jpeg"
 ```
 
-Do not ask Codex to run this live verification.
+Codexにこのライブ検証を実行させないでください。
 
-## Test
+## テスト
 
 ```bash
 uv run python -m compileall app
 uv run pytest
 ```
 
-Tests must not require real API keys or real provider calls.
+テストは実APIキーや実プロバイダー呼び出しを必要としません。
 
-## Project Layout
+## プロジェクト構成
 
 ```text
 app/
@@ -399,7 +399,7 @@ docs/
 tests/
 ```
 
-Key documents:
+主要ドキュメント:
 
 - `docs/OCR_PROJECT_SPEC.md`
 - `docs/API_SPEC.md`
