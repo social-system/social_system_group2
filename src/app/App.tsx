@@ -241,7 +241,7 @@ export default function App() {
   };
 
   // 家計簿・レシートデータの読み込み (サマリー取得後、個別詳細を並列マージ)
-  const fetchExpenses = async () => {
+  const fetchExpensesOLD = async () => {
     try {
       const res = await fetch(`${kakeibo_URL}/receipts`); 
       if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
@@ -285,6 +285,75 @@ export default function App() {
     }
   };
 
+  const fetchExpenses = async () => {
+      try {
+        const res = await fetch(`${kakeibo_URL}/receipts`); 
+        if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
+        const summaryData = await res.json();
+        
+        if (Array.isArray(summaryData) && summaryData.length > 0) {
+          // 1. 型定義を一旦「(Expense | null)[]」として受け取る
+          const resultsWithNull: (Expense | null)[] = await Promise.all(
+            summaryData.map(async (item: any) => {
+              if (!item) return null;
+
+              // --- 安全に日付をパースするガード処理 ---
+              let parsedDate = new Date();
+              const dateStr = String(item.purchased_at || "");
+              
+              if (dateStr && dateStr.length === 8 && !dateStr.startsWith("0") && dateStr !== "undefined") {
+                const y = Number(dateStr.substring(0, 4));
+                const m = Number(dateStr.substring(4, 6)) - 1;
+                const d = Number(dateStr.substring(6, 8));
+                if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+                  parsedDate = new Date(y, m, d);
+                }
+              } else if (item.purchased_at && String(item.purchased_at).includes("-")) {
+                parsedDate = new Date(item.purchased_at);
+              }
+
+              const currentId = item.id !== undefined && item.id !== null ? item.id.toString() : Math.random().toString();
+              
+              let itemsPayload: ReceiptItemPayload[] = [];
+              if (item.id !== undefined && item.id !== null) {
+                try {
+                  const detailRes = await fetch(`${kakeibo_URL}/receipts/${item.id}`);
+                  if (detailRes.ok) {
+                    const detailData = await detailRes.json();
+                    itemsPayload = detailData.items || [];
+                  }
+                } catch (err) {
+                  console.error(`レシート詳細(id:${item.id})の取得に失敗しました`, err);
+                }
+              }
+
+              return {
+                id: currentId,
+                amount: Number(item.total_amount) || 0,
+                category: "レシートデータ",
+                description: item.store_name || "店舗名未設定",
+                date: parsedDate,
+                items: itemsPayload
+              };
+            })
+          );
+          
+          // 2. nullを綺麗にフィルター除去し、型を確定させる
+          const detailedExpenses: Expense[] = resultsWithNull.filter(
+            (e): e is Expense => e !== null
+          );
+          
+          setExpenses(detailedExpenses);
+          syncInventoryFromExpenses(detailedExpenses);
+        } else {
+          setExpenses([]);
+        }
+      } catch (err) {
+        console.error("読み込み失敗", err);
+        setExpenses([]);
+      }
+    };
+    
   // 共通のレシート登録用関数
   const submitReceiptPayload = async (requestBody: any) => {
     try {
