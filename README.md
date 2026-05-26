@@ -1027,7 +1027,7 @@ uv run ruff check .
 
 テストでは通常開発用の `receipts.db` を使わず、一時 SQLite DB に差し替えます。
 
-## Render デプロイ方針
+## Render デプロイ
 
 本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
 
@@ -1036,38 +1036,31 @@ API: Render Web Service
 DB: Render PostgreSQL
 DB接続: Render PostgreSQL の Internal Database URL
 Schema管理: Alembic
-ローカル開発DB: SQLite継続可
 ```
 
-Render 対応の実装手順は `docs/deploys/` に分割しています。作業時は `docs/deploys/README.md` の順番どおりに進めます。
+ローカル開発では、`DATABASE_URL` を未設定にすると SQLite (`sqlite:///./receipts.db`) を使います。本番では Render PostgreSQL の Internal Database URL を `DATABASE_URL` に設定します。
 
-必要な環境変数:
+### 必要な環境変数
 
 | 変数 | 内容 |
 | --- | --- |
-| `DATABASE_URL` | Render PostgreSQL の接続URL。本番では Internal Database URL を使う |
-| `APP_ENV` | 本番では `production` |
+| `DATABASE_URL` | Render PostgreSQL の接続URL |
+| `APP_ENV` | `production` |
 | `CORS_ALLOW_ORIGINS` | フロントエンドURL。カンマ区切り可 |
 | `PORT` | Render が自動設定するため通常は手動設定不要 |
 
-Render 側の設定例:
+`DATABASE_URL` には Render PostgreSQL の Internal Database URL を使います。実際の接続URL、DBユーザー名、DBパスワードは README や設定ファイルに直接書かないでください。
 
-```text
-Build Command: pip install -e .
-Start Command: bash scripts/start_render.sh
-```
+### Render PostgreSQL 作成手順
 
-起動スクリプトでは、次の順に実行する方針です。
+1. Render ダッシュボードで PostgreSQL を作成します。
+2. database name と user は任意ですが、`render.yaml` の例では `receipt_db` / `receipt_user` を使っています。
+3. Web Service から参照できるよう、Internal Database URL を使います。
+4. 実際の URL やパスワードはリポジトリに保存しません。
 
-```text
-alembic upgrade head
-python -m scripts.seed_master_data
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-```
+### Render Web Service 作成手順
 
-本番では `Base.metadata.create_all()` による自動テーブル作成を行いません。スキーマ変更は Alembic migration で管理します。
-
-Render 手動デプロイの流れ:
+手動デプロイの流れ:
 
 ```text
 1. RenderでPostgreSQLを作成する
@@ -1080,7 +1073,42 @@ Render 手動デプロイの流れ:
 8. / と /docs を確認する
 ```
 
-疎通確認:
+Render 側の設定例:
+
+```text
+Build Command: pip install -e .
+Start Command: bash scripts/start_render.sh
+```
+
+`render.yaml` を使う場合は、`DATABASE_URL` を `fromDatabase` で Render PostgreSQL から渡す設定例にしています。`CORS_ALLOW_ORIGINS` は `https://your-frontend.example.com` のようなプレースホルダーなので、実際のフロントエンドURLに差し替えてください。
+
+### migration の流れ
+
+Render の Start Command は `scripts/start_render.sh` を実行します。起動スクリプトでは、次の順に実行します。
+
+```text
+alembic upgrade head
+python -m scripts.seed_master_data
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+本番では `Base.metadata.create_all()` による自動テーブル作成を行いません。スキーマ変更は Alembic migration で管理します。起動時は先に `alembic upgrade head` を実行し、その後に必要最小限のマスタデータを `python -m scripts.seed_master_data` で投入します。
+
+### CORS 設定
+
+本番では `CORS_ALLOW_ORIGINS` に許可するフロントエンドURLだけを設定します。複数ある場合はカンマ区切りで指定できます。
+
+例:
+
+```text
+CORS_ALLOW_ORIGINS=https://your-frontend.example.com,https://another-frontend.example.com
+```
+
+`*` は許可しません。資格情報付きCORSとワイルドカードを組み合わせないでください。
+
+### 疎通確認
+
+デプロイ後に `/` と `/docs` を確認します。ヘルスチェックは次で確認できます。
 
 ```bash
 curl https://YOUR_RENDER_SERVICE.onrender.com/
@@ -1092,13 +1120,13 @@ curl https://YOUR_RENDER_SERVICE.onrender.com/
 {"status":"ok"}
 ```
 
-よくある失敗:
+### よくある失敗
 
-- `DATABASE_URL` が未設定で SQLite に接続してしまう
+- `DATABASE_URL` 未設定でSQLiteに接続してしまう
 - `CORS_ALLOW_ORIGINS` にフロントエンドURLが入っていない
 - `alembic upgrade head` が失敗してテーブルがない
-- Render の Start Command が `bash scripts/start_render.sh` になっていない
-- 実際の DB 接続URL、ユーザー名、パスワードを README や設定ファイルに直接書いてしまう
+- Start Command が間違っていて起動しない
+- 秘密情報をREADMEに直接書いてしまう
 
 ## 開発時の注意
 

@@ -1,0 +1,22 @@
+databases:
+  - name: receipt-db
+    databaseName: receipt_db
+    user: receipt_user
+
+services:
+  - type: web
+    name: receipt-api
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: bash scripts/start_render.sh
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: receipt-db
+          property: connectionString
+      - key: CORS_ALLOW_ORIGINS
+        value: https://your-frontend.example.com
+      - key: PYTHON_VERSION
+        value: "3.12"

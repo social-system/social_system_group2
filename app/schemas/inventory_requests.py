@@ -5,10 +5,22 @@ from typing import Literal
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
+def _normalize_optional_key(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
 class InventoryReceiptApplyRequest(BaseModel):
     default_location_id: int | None = None
     expires_at_by_receipt_item_id: dict[int, date] = Field(default_factory=dict)
     idempotency_key: str | None = Field(default=None, max_length=255)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str | None) -> str | None:
+        return _normalize_optional_key(value)
 
 
 class InventoryMovementCreateRequest(BaseModel):
@@ -21,6 +33,11 @@ class InventoryMovementCreateRequest(BaseModel):
     reason: str | None = Field(default=None, max_length=255)
     occurred_at: datetime | None = None
     idempotency_key: str | None = Field(default=None, max_length=255)
+
+    @field_validator("idempotency_key")
+    @classmethod
+    def normalize_idempotency_key(cls, value: str | None) -> str | None:
+        return _normalize_optional_key(value)
 
     @field_validator("unit")
     @classmethod

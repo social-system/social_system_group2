@@ -1,7 +1,7 @@
 from datetime import date
 from decimal import Decimal
 
-from app.inventory.models import InventoryBatch, InventoryMovement
+from app.inventory.models import InventoryBatch, InventoryMovement, InventoryOperation
 from app.receipts.models import Product, Receipt, ReceiptItem
 
 
@@ -320,6 +320,31 @@ def test_adjust_positive_creates_inventory_batch(client, db_session):
     batch = db_session.query(InventoryBatch).one()
     assert batch.receipt_item_id is None
     assert batch.current_quantity == Decimal("6.00")
+
+
+def test_blank_idempotency_key_is_not_stored_in_unique_columns(client, db_session):
+    product = create_product(db_session)
+
+    for _ in range(2):
+        response = client.post(
+            "/inventory/movements",
+            json={
+                "product_id": product.id,
+                "movement_type": "adjust",
+                "quantity": "1.00",
+                "unit": product.default_base_unit,
+                "idempotency_key": "  ",
+            },
+        )
+        assert response.status_code == 200
+
+    operations = db_session.query(InventoryOperation).order_by(InventoryOperation.id).all()
+    movements = db_session.query(InventoryMovement).order_by(InventoryMovement.id).all()
+
+    assert len(operations) == 2
+    assert len(movements) == 2
+    assert [operation.idempotency_key for operation in operations] == [None, None]
+    assert [movement.idempotency_key for movement in movements] == [None, None]
 
 
 def test_dispose_decreases_inventory_and_records_movement(client, db_session):

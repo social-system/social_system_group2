@@ -1,3 +1,6 @@
+import importlib
+
+from app.db.session import Base
 from app.db.session import get_engine_kwargs, normalize_database_url
 from app.main import parse_cors_allow_origins
 
@@ -52,3 +55,14 @@ def test_parse_cors_allow_origins_rejects_wildcard():
         assert "must not contain '*'" in str(exc)
     else:
         raise AssertionError("Expected ValueError")
+
+
+def test_importing_main_does_not_create_tables(monkeypatch):
+    def fail_create_all(*args, **kwargs):
+        raise AssertionError("app.main import must not create tables")
+
+    monkeypatch.setattr(Base.metadata, "create_all", fail_create_all)
+
+    import app.main as main_module
+
+    importlib.reload(main_module)
