@@ -68,6 +68,15 @@ func extractJSON(s string) string {
 	return s[start : end+1]
 }
 
+func checkIngredientExistence(ingredient aiIngredient) bool {
+	// AIの回答にてAmountが0本や0gといった表記の場合はレシピに必要ないと判断する
+	amount := strings.TrimSpace(ingredient.Amount)
+	if amount == "0" || amount == "0本" || amount == "0g" || amount == "0個" || amount == "大さじ0" || amount == "小さじ0" {
+		return false
+	}
+	return true
+}
+
 func convertRecipe(r aiRecipe) (Recipe, error) {
 	if r.Name == "" {
 		return Recipe{}, fmt.Errorf("recipe name is empty")
@@ -78,6 +87,9 @@ func convertRecipe(r aiRecipe) (Recipe, error) {
 
 	ingredients := make([]Ingredient, 0, len(r.Ingredients))
 	for _, ing := range r.Ingredients {
+		if !checkIngredientExistence(ing) {
+			continue
+		}
 		ingredients = append(ingredients, Ingredient{
 			Name:       ing.Name,
 			Amount:     ing.Amount,
