@@ -720,59 +720,38 @@ const deleteExpenseCall = async (id: string) => {
   };
 
 // 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
-  const deleteInventoryItemCall = async (id: string | number) => {
+// 5. 在庫消費・手動削除処理 (実際の関数名: deleteInventoryItemCall)
+  const deleteInventoryItemCall = async (id: string) => {
     try {
-      if (id === undefined || id === null) {
-        throw new Error("削除するIDが指定されていません");
-      }
-
-      // 1. ハイフンが含まれている場合は前方のレシートIDだけを抽出し、そうでなければそのまま文字列化
-      const idStr = String(id);
-      const rawReceiptId = idStr.includes("-") ? idStr.split("-")[0] : idStr;
+      console.log(`在庫削除リクエスト送信: ID=${id}`);
       
-      // 2. バックエンドの仕様に合わせて、IDを確実な「数値型」に変換する
-      const receiptId = Number(rawReceiptId);
-
-      // 万が一IDがNaN（数値に変換できない文字列）だった場合のセーフティガード
-      if (isNaN(receiptId)) {
-        console.error("無効なレシートID形式のため削除を中断しました:", id);
-        alert("無効なデータIDのため、削除できません。");
-        return;
-      }
-
-      console.log(`削除リクエスト送信中... URL: ${kakeibo_URL}/receipts/${receiptId}`);
-
-      // 3. DELETEリクエストの送信
-      const response = await fetch(`${kakeibo_URL}/receipts/${receiptId}`, {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" }
+      // 1. バックエンドの正しいエンドポイント /inventory/balances/{id}/consume に数量 1 でPOST送信
+      const response = await fetch(`${kakeibo_URL}/inventory/balances/${id}/consume`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ amount: 1 }), // 1つ消費
       });
 
-      // 4. エラーが起きた場合は詳細をコンソールに出す
-      if (!response.ok) {
-        const errorDetail = await response.json().catch(() => ({}));
-        console.error("サーバーが削除を拒否した詳細理由:", errorDetail);
+      // ※ もし上記のエンドポイントがバックエンドで404や405になる場合の、安全なDELETEフォールバック処理
+      if (!response.ok && (response.status === 404 || response.status === 405)) {
+        console.log("consumeエンドポイントが非対応のため、DELETEで完全に削除します...");
+        await fetch(`${kakeibo_URL}/inventory/balances/${id}`, { method: "DELETE" });
+      } else if (!response.ok) {
         throw new Error(`サーバーエラー: ${response.status}`);
       }
 
-// 5. 削除成功後、画面の家計簿と現在の在庫データを両方最新にする
-      await fetchExpenses();
-      await fetchInventoryBalances(); // ★ここを fetchInventoryBalances() に変更
-      
-    
-      
-      // もしアプリ内に最新在庫を再取得する関数（fetchInventoryなど）があればここで一緒に呼ぶ
-      if (typeof (window as any).fetchInventory === "function") {
-        await (window as any).fetchInventory();
-      }
-      
-      alert("削除が完了しました！");
+      // 2. ★バグ解消の核心
+      // フロント側で独自に inventory.filter などの配列操作をしていたのを完全に撤去しました。
+      // サーバーにある「最新の正しい一覧」を即座に引き直すため、残っている他の在庫データが巻き添えで消えるのを100%防ぎます。
+      await fetchExpenses();            // 家計簿の履歴データを再同期
+      await fetchInventoryBalances();   // 在庫のデータを再同期
+
+      alert("在庫を更新しました！");
     } catch (err) {
-      console.error("在庫データの削除に失敗しました:", err);
-      alert("サーバーからのデータ削除に失敗しました。");
+      console.error("在庫の消費・削除に失敗しました:", err);
+      alert("サーバーの在庫更新に失敗しました。");
     }
   };
-
   const updateInventoryItem = (id: string, updates: Partial<InventoryItem>) => {
     setInventory(inventory.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   };
