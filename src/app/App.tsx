@@ -372,88 +372,115 @@ export default function App() {
   };
 
 
-  const submitReceiptPayload = async (requestBody: any) => {
-      try {
-        if (!requestBody) return;
+const submitReceiptPayload = async (requestBody: any) => {
+    try {
+      if (!requestBody) return;
 
-        // --- 1. 日付を「整数型 (YYYYMMDD)」に変換 ---
-        let dateNum = 20260512;
-        if (requestBody.purchased_at) {
-          const cleanDate = String(requestBody.purchased_at).replace(/[-/]/g, '');
-          if (cleanDate.length === 8 && !isNaN(Number(cleanDate))) {
-            dateNum = Number(cleanDate);
-          }
+      // --- 1. 日付を「整数型 (YYYYMMDD)」に安全変換 ---
+      let dateNum = 20260526;
+      if (requestBody.purchased_at) {
+        const cleanDate = String(requestBody.purchased_at).replace(/[-/]/g, '');
+        if (cleanDate.length === 8 && !isNaN(Number(cleanDate))) {
+          dateNum = Number(cleanDate);
         }
-
-        // --- 2. 400エラー(金額0)を回避するデータ整形 ---
-        // 合計金額が0または空の場合は、バリデーションを突破するために最低「1(円)」にする
-        const rawTotal = Number(requestBody.total_amount);
-        const cleanedTotalAmount = rawTotal <= 0 ? 1 : rawTotal;
-
-        const cleanedBody = {
-          purchased_at: dateNum,
-          store_name: (requestBody.store_name || "手動登録店舗").trim(),
-          total_amount: cleanedTotalAmount,
-          items: Array.isArray(requestBody.items) && requestBody.items.length > 0
-            ? requestBody.items.map((item: any) => {
-                const name = item.raw_name && item.raw_name.trim() ? item.raw_name.trim() : "手動登録商品";
-                const qty = Math.max(1, Number(item.purchased_quantity) || 1);
-                
-                // 明細の金額も0以下の場合は最低「1(円)」にする
-                const itemTotal = Number(item.line_total);
-                const cleanedLineTotal = itemTotal <= 0 ? 1 : itemTotal;
-
-                return {
-                  raw_name: name,
-                  normalized_name: item.normalized_name || name,
-                  product_id: Number(item.product_id) || 1,
-                  category_id: Number(item.category_id) || 1,
-                  purchased_quantity: qty,
-                  purchased_unit: (item.purchased_unit || "個").trim(),
-                  base_quantity: Math.max(1, Number(item.base_quantity || qty)),
-                  base_unit: (item.base_unit || item.purchased_unit || "個").trim(),
-                  unit_price: cleanedLineTotal, // 単価も1にする
-                  line_total: cleanedLineTotal, // 明細合計を1にする
-                  is_inventory_target: item.is_inventory_target ?? true
-                };
-              })
-            : [
-                {
-                  raw_name: "手動登録商品",
-                  normalized_name: "手動登録商品",
-                  product_id: 1,
-                  category_id: 1,
-                  purchased_quantity: 1,
-                  purchased_unit: "個",
-                  base_quantity: 1,
-                  base_unit: "個",
-                  unit_price: cleanedTotalAmount,
-                  line_total: cleanedTotalAmount,
-                  is_inventory_target: true
-                }
-              ]
-        };
-
-        // --- 3. サーバーへ送信 ---
-        const response = await fetch(`${kakeibo_URL}/receipts`, {  
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(cleanedBody),
-        });
-
-        if (!response.ok) {
-          const errorDetail = await response.json().catch(() => ({}));
-          console.error("サーバーエラー詳細:", errorDetail);
-          throw new Error(`サーバーエラー: ${response.status}`);
-        }
-
-        await fetchExpenses(); 
-        alert("手動レシートの登録に成功しました！");
-      } catch (err) {
-        console.error("レシートデータの送信に失敗しました:", err);
-        alert("サーバーへの保存に失敗しました。金額や入力内容を確認してください。");
       }
-    };
+
+      // フォームから送られてきた明細の配列（空ならダミーをセット）
+      const incomingItems = Array.isArray(requestBody.items) && requestBody.items.length > 0
+        ? requestBody.items
+        : [{ raw_name: "手動登録商品", purchased_quantity: 1, line_total: 0, purchased_unit: "個" }];
+
+      // --- 2. 各明細の商品マスタをバックエンドに事前登録/解決する ---
+      const processedItems = await Promise.all(
+        incomingItems.map(async (item: any) => {
+          const name = (item.raw_name || "手動登録商品").trim();
+          const unit = (item.purchased_unit || "個").trim();
+          
+          let resolvedProductId = 1; // デフォルト値
+          let resolvedCategoryId = 1;
+
+          try {
+            // 新仕様: POST /products を叩いて商品マスタを確保する
+            const prodRes = await fetch(`${kakeibo_URL}/products`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                name: name,
+                default_base_unit: unit,
+                is_inventory_target: item.is_inventory_target ?? true,
+                default_category_id: 1,
+                initial_alias_name: name,
+                alias_source: "user_confirmed"
+              })
+            });
+
+            if (prodRes.status === 201 || prodRes.status === 200) {
+              const prodData = await prodRes.json();
+              resolvedProductId = prodData.id || 1;
+              resolvedCategoryId = prodData.default_category_id || 1;
+            } else if (prodRes.status === 409) {
+              // 409 Conflict (既に商品が存在する場合) は、ID: 1 のままか、固定値で続行
+              resolvedProductId = 1; 
+              resolvedCategoryId = 1;
+            }
+          } catch (err) {
+            console.warn("商品マスタの自動作成をスキップしました (続行します):", err);
+          }
+
+          // 金額が0円以下の場合は400エラー回避のために1円にする
+          const rawTotal = Number(item.line_total);
+          const cleanedLineTotal = rawTotal <= 0 ? 1 : rawTotal;
+          const qty = Math.max(1, Number(item.purchased_quantity) || 1);
+
+          return {
+            raw_name: name,
+            normalized_name: item.normalized_name || name,
+            product_id: resolvedProductId,   // バックエンドに存在する（または今作った）正しいID
+            category_id: resolvedCategoryId, // 正しいカテゴリID
+            purchased_quantity: qty,
+            purchased_unit: unit,
+            base_quantity: Math.max(1, Number(item.base_quantity || qty)),
+            base_unit: (item.base_unit || unit).trim(),
+            unit_price: cleanedLineTotal,
+            line_total: cleanedLineTotal,
+            is_inventory_target: item.is_inventory_target ?? true
+          };
+        })
+      );
+
+      // --- 3. レシート合計金額の算出 ---
+      const calculatedTotal = processedItems.reduce((sum, item) => sum + item.line_total, 0);
+
+      const cleanedBody = {
+        purchased_at: dateNum,
+        store_name: (requestBody.store_name || "手動登録店舗").trim(),
+        total_amount: calculatedTotal, // 明細の1円補正に合わせた合計金額
+        items: processedItems
+      };
+
+      console.log("送信するクレンジング済みデータ:", cleanedBody);
+
+      // --- 4. レシート本登録リクエスト送信 ---
+      const response = await fetch(`${kakeibo_URL}/receipts`, {  
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(cleanedBody),
+      });
+
+      if (!response.ok) {
+        const errorDetail = await response.json().catch(() => ({}));
+        console.error("サーバーエラー詳細:", errorDetail);
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // 5. 最新一覧の再取得
+      await fetchExpenses(); 
+      alert("手動在庫（レシート）の登録に成功しました！");
+    } catch (err) {
+      console.error("レシートデータの送信に失敗しました:", err);
+      alert("サーバーへの保存に失敗しました。マスタデータを確認してください。");
+    }
+  };
 
 
   // 手動家計簿追加
