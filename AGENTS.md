@@ -2,276 +2,184 @@
 
 ## 目的
 
-このリポジトリは、ユーザー確認済みのレシート購入履歴を保存する FastAPI バックエンドである。
+このリポジトリは、ユーザー確認済みのレシート購入履歴、商品マスタ、価格比較、在庫情報を扱う FastAPI バックエンドである。
 
-OCR API ではない。画像アップロードや OCR 処理は実装しない。
+今回の作業目的は、既存の開発用 SQLite 前提の実装を、Render + Render PostgreSQL に安全にデプロイできる構成へ変更することである。
 
-この DB は、家計簿、在庫管理、AI レシピ提案が共通で使える購入履歴を保存する。
+Supabase は今回の対象外とする。DB は Render PostgreSQL、API 実行環境は Render Web Service を前提にする。
 
 ## 最重要方針
 
-OCR 結果をそのまま DB に登録しない。
+本番では `Base.metadata.create_all()` による自動テーブル作成を行わない。
 
 ```text
-OCR 結果 = 仮データ
-DB 登録データ = ユーザー確認済みデータ
+開発・テスト: SQLite を利用してよい
+本番: Render PostgreSQL + Alembic migration でスキーマ管理する
 ```
 
-DB API は、フロントエンドでユーザー確認が終わったデータだけを受け取る。
+本番DBのスキーマ変更は必ず Alembic migration で行う。
 
-## 今回の大方針
+## 作業順序
 
-今回は既存テーブル定義を作り直す。
-
-既存の `receipt_total`、`item`、`num`、`amount`、`total`、`date`、`ingredients` を前提にした設計は廃止する。
-
-新しい設計は `docs/DATABASE_DESIGN.md` に従う。
-
-## 作業前に読む文書
-
-Codex は作業前に必ず以下を読む。
+Codex は、以下の順番で `docs/deploys/STEP_XX.md` を実行する。
 
 ```text
-README.md
+docs/deploys/STEP_00_SCOPE_AND_BASELINE.md
+docs/deploys/STEP_01_RUNTIME_CONFIG_AND_DATABASE_URL.md
+docs/deploys/STEP_02_DISABLE_PRODUCTION_CREATE_ALL_AND_SEEDING.md
+docs/deploys/STEP_03_ALEMBIC_INITIAL_MIGRATION.md
+docs/deploys/STEP_04_RENDER_DEPLOYMENT_FILES.md
+docs/deploys/STEP_05_TESTS_AND_POSTGRES_COMPATIBILITY.md
+docs/deploys/STEP_06_README_DEPLOYMENT_DOCS.md
+docs/deploys/STEP_07_FINAL_VERIFICATION.md
+```
+
+各STEPは独立して読めるように書いてあるが、順番を飛ばさない。
+
+## 作業前に必ず読む文書
+
+```text
 AGENTS.md
+README.md
 docs/DATABASE_DESIGN.md
+docs/INVENTORY_IMPLEMENTATION_SPEC.md
 docs/API_SPEC.md
 docs/OCR_DB_INTERFACE.md
-docs/CODEX_IMPLEMENTATION_PLAN.md
+対象STEPの docs/deploys/STEP_XX.md
 ```
 
-仕様に矛盾がある場合は、次の優先順位で判断する。
+仕様に矛盾がある場合の優先順位は次の通り。
 
 ```text
-docs/DATABASE_DESIGN.md
+対象STEPの docs/deploys/STEP_XX.md
 AGENTS.md
+docs/DATABASE_DESIGN.md
+docs/INVENTORY_IMPLEMENTATION_SPEC.md
+docs/API_SPEC.md
 README.md
 既存コード
 ```
 
-## 実装するもの
+## 実装対象
 
 ```text
-SQLAlchemy モデル
-Pydantic request / response schema
-レシート登録 API
-レシート一覧 API
-レシート詳細 API
-レシート削除 API
-テスト
+DATABASE_URL によるDB接続切替
+Render PostgreSQL 接続対応
+PostgreSQLドライバ追加
+Alembic導入
+初期migration作成
+本番起動時の create_all 無効化
+本番起動用スクリプト作成
+Render用設定ファイル作成
+CORS許可オリジンの環境変数化
+Render向けREADME更新
+テスト更新
 ```
 
 ## 実装しないもの
 
 ```text
+Supabase対応
+OCR API
+画像アップロード
+画像保存
+レシピ提案 API
 認証
 ユーザー管理
 世帯管理
-user_id によるデータ分離
-OCR API
-画像保存
-OCR 仮データ保存
-レシート更新 API
-月別・カテゴリ別集計 API
-在庫テーブル
-レシピ提案 API
-Alembic 導入
-本番 DB 対応
-外部 API 連携
+既存API仕様の大幅変更
+既存テーブル設計の作り直し
+本番データの初期投入用ダミーデータ追加
+秘密情報のコミット
 ```
 
-## DB 設計方針
+## 秘密情報の扱い
 
-作成する主なテーブルは次の通り。
+`.env` や秘密鍵を作成してコミットしてはいけない。
+
+以下はリポジトリに含めてはいけない。
 
 ```text
-receipts
-receipt_items
-accounting_categories
-products
-product_aliases
-product_unit_conversions
+Render の実際の DATABASE_URL
+DBユーザー名
+DBパスワード
+APIキー
+秘密鍵
+個人のメールアドレスやトークン
 ```
 
-`receipt_items` では、購入時の数量・単位と、在庫・レシピ用の共通数量・単位を分ける。
+ドキュメントには例としてのみ、次のようなプレースホルダーを使う。
 
 ```text
-purchased_quantity / purchased_unit
-base_quantity / base_unit
+DATABASE_URL=postgresql+psycopg://USER:PASSWORD@HOST:PORT/DB_NAME
+CORS_ALLOW_ORIGINS=https://your-frontend.example.com
 ```
 
-`raw_name` はレシート上の商品名、`normalized_name` はアプリ内で扱う商品名である。
+## DB接続方針
 
-同じ商品名でも単位が違う場合は、別々の `receipt_items` として保存し、`base_quantity` と `base_unit` で集計できるようにする。
-
-例:
+`DATABASE_URL` が設定されていない場合は、開発用として SQLite を使ってよい。
 
 ```text
-卵 1パック -> base_quantity 10, base_unit 個
-卵 6個     -> base_quantity 6,  base_unit 個
+未設定: sqlite:///./receipts.db
+本番: Render PostgreSQL の Internal Database URL
 ```
 
-## API 方針
+Render の接続文字列が `postgres://` で始まる場合は、SQLAlchemy + psycopg で扱えるように `postgresql+psycopg://` へ正規化する。
 
-既存 API パスは維持する。
+SQLite のときだけ `connect_args={"check_same_thread": False}` を使う。
+
+PostgreSQL のときは `connect_args` に SQLite 専用設定を渡さない。
+
+## 本番起動方針
+
+Render Web Service では、起動時に次を順番に行う。
 
 ```text
-POST /receipts
-GET /receipts
-GET /receipts/{receipt_id}
-DELETE /receipts/{receipt_id}
+alembic upgrade head
+必要最小限のマスタデータ seed
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
 ```
 
-`POST /receipts` は確認済みデータだけを登録する。
+ただし、アプリケーションコードの import 時や FastAPI 起動時に `Base.metadata.create_all()` を実行してはいけない。
 
-`items_total` と `adjustment_amount` はサーバー側で計算する。
+## CORS方針
 
-```text
-items_total = sum(line_total)
-adjustment_amount = total_amount - items_total
-```
+開発環境では `http://localhost:5173` を許可する。
 
-`total_amount == items_total` は必須にしない。
+本番では `CORS_ALLOW_ORIGINS` にカンマ区切りで指定されたURLだけを許可する。
 
-理由は、実レシートには割引、ポイント、税、レジ袋、OCR 漏れなどがあるためである。
-
-## バリデーション方針
-
-型や形式の誤りは `422 Unprocessable Entity` とする。
-
-形式は正しいが、業務ルールとして不正な場合は `400 Bad Request` とする。
-
-存在しない ID は `404 Not Found` とする。
-
-主なルール:
-
-```text
-items は 1 件以上
-purchased_at は実在する日付
-total_amount は 0 以上
-raw_name は空文字不可
-purchased_quantity は 0 より大きい
-line_total は 0 以上
-is_inventory_target true の場合 normalized_name は必須
-is_inventory_target true の場合 base_quantity は必須
-is_inventory_target true の場合 base_unit は必須
-```
-
-`unit_price * purchased_quantity == line_total` は必須にしない。
-
-`total_amount == sum(line_total)` も必須にしない。
-
-## レイヤー責務
-
-ルーターでは以下を行う。
-
-```text
-リクエスト受け取り
-DB セッション取得
-CRUD 関数呼び出し
-HTTPException への変換
-```
-
-CRUD では以下を行う。
-
-```text
-DB 操作
-存在確認
-業務ルール検証
-items_total / adjustment_amount の計算
-```
-
-Pydantic スキーマでは以下を行う。
-
-```text
-型検証
-基本的な値検証
-日付形式検証
-```
-
-SQLAlchemy モデルでは以下を行う。
-
-```text
-テーブル定義
-リレーション定義
-外部キー定義
-```
+`*` を安易に許可してはいけない。資格情報付きCORSと `*` を組み合わせてはいけない。
 
 ## テスト方針
 
-最低限、以下をテストする。
-
-```text
-登録成功
-一覧取得成功
-詳細取得成功
-削除成功
-items 空配列は 422
-不正日付は 422
-在庫対象なのに normalized_name が空なら 422
-在庫対象なのに base_quantity が空なら 422
-total_amount と items_total が違っても登録できる
-存在しない receipt_id は 404
-```
-
 テストでは通常開発用の `receipts.db` を使わない。
 
-一時 DB またはテスト専用 SQLite DB を使う。
+テストは SQLite in-memory または一時SQLiteでよい。
 
-## 実行コマンド
+テストでは Alembic migration の完全検証より、既存APIの回帰、DB接続設定、CORS設定、本番で `create_all()` が自動実行されないことを重視する。
 
-基本確認:
-
-```bash
-uv run python -m compileall app
-```
-
-テスト:
+## 変更後に必ず実行する確認
 
 ```bash
+uv sync
 uv run pytest
 ```
 
-利用可能なら実行:
+`uv` が使えない環境では次を実行する。
 
 ```bash
-uv run ruff check .
+python -m pip install -e .
+python -m pip install pytest
+python -m pytest
 ```
 
-設定されていないツールは無理に導入しない。
-
-## git 運用
-
-作業開始時に確認する。
-
-```bash
-git status --short
-git branch --show-current
-```
-
-ユーザーの未コミット変更を勝手に戻さない。
-
-GitHub への push は行わない。
-
-禁止:
-
-```bash
-git push
-git push --force
-git push --force-with-lease
-```
-
-ローカル commit は、利用者から明示された場合のみ行う。
-
-## 完了報告
-
-作業後は次を報告する。
+## 完了条件
 
 ```text
-変更したファイル
-実装したテーブル
-実装した API
-実行したテスト
-失敗したテストがある場合は原因
-残した TODO
+全テストが成功する
+アプリがローカルSQLiteで起動する
+DATABASE_URL指定時にPostgreSQL用URLを読める
+本番起動時にAlembic migrationを流せる
+Render用の設定と手順がREADMEにある
+秘密情報がリポジトリに含まれていない
 ```
