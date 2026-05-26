@@ -515,28 +515,63 @@ useEffect(() => {
     };
 
   // 手動家計簿追加
+// 5. 手動家計簿データ追加 (直接 POST /receipts を叩くように修正)
   const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
-    const requestBody = {
-      purchased_at: formatToYmdNumber(expense.date || new Date()),
-      store_name: expense.description || "手動登録店舗",
-      total_amount: Number(expense.amount),
-      items: [
-        {
-          raw_name: expense.description || "手動登録商品",
-          normalized_name: expense.category || "未分類",
-          product_id: 1,
-          category_id: 1,
-          purchased_quantity: 1,
-          purchased_unit: "個",
-          base_quantity: 1,
-          base_unit: "個",
-          unit_price: Number(expense.amount),
-          line_total: Number(expense.amount),
-          is_inventory_target: false 
-        }
-      ]
-    };
-    await submitReceiptPayload(requestBody);
+    try {
+      // 画面から入力された日付を、バックエンドが求める「整数型 (YYYYMMDD)」に安全変換
+      let dateNum = 20260526;
+      if (expense.date) {
+        const d = new Date(expense.date);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        dateNum = Number(`${y}${m}${day}`);
+      }
+
+      // バックエンドの仕様書（POST /receipts）に完全適合するデータ構造を作成
+      const requestBody = {
+        purchased_at: dateNum,
+        store_name: (expense.description || "手動登録店舗").trim(),
+        total_amount: Number(expense.amount) || 0,
+        items: [
+          {
+            raw_name: (expense.description || "手動登録商品").trim(),
+            normalized_name: (expense.category || "娯楽").trim(),
+            product_id: null,  // 家計簿単体登録のため null でOK
+            category_id: null, // カテゴリは文字列で渡すか、nullにしてバックエンドに任せる
+            purchased_quantity: 1,
+            purchased_unit: "個",
+            base_quantity: 1,
+            base_unit: "個",
+            unit_price: Number(expense.amount) || 0,
+            line_total: Number(expense.amount) || 0,
+            is_inventory_target: false // 家計簿専用フォームからのため false 固定
+          }
+        ]
+      };
+
+      console.log("手動家計簿登録の送信ペイロード:", requestBody);
+
+      // 直接本登録APIを呼び出す
+      const response = await fetch(`${kakeibo_URL}/receipts`, {  
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(requestBody),
+      });
+
+      if (!response.ok) {
+        const errorDetail = await response.json().catch(() => ({}));
+        console.error("手動家計簿登録エラー詳細:", errorDetail);
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // 家計簿一覧（expenses）を再取得して画面を更新
+      await fetchExpenses(); 
+      alert("家計簿にデータを登録しました！");
+    } catch (err) {
+      console.error("手動家計簿の送信に失敗しました:", err);
+      alert("サーバーへの保存に失敗しました。入力値を確認してください。");
+    }
   };
 
   // 4. 家計簿・レシートデータ削除 (DELETE /receipts/{receipt_id} 仕様に完全準拠)
