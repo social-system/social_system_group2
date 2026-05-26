@@ -114,6 +114,11 @@ def test_provider_sends_schema_constrained_request() -> None:
         client.received_instructions
     )
     assert "low confidence, return null" in client.received_instructions
+    assert "product name candidate" in client.received_instructions
+    assert "does not have to match products.name" in client.received_instructions
+    assert "Do not proactively warn about a mismatch" in client.received_instructions
+    assert "product IDs" in client.received_instructions
+    assert "category IDs" in client.received_instructions
     assert client.received_gemini_result == "fake gemini receipt text"
     assert client.received_response_format == OPENAI_RECEIPT_RESPONSE_FORMAT
     assert client.received_response_format["strict"] is True
@@ -127,6 +132,8 @@ def test_provider_sends_schema_constrained_request() -> None:
     assert set(item_schema["required"]) == set(item_schema["properties"])
     assert "null" in schema["properties"]["store_name"]["type"]
     assert "null" in item_schema["properties"]["raw_name"]["type"]
+    assert "product_id" not in item_schema["properties"]
+    assert "category_id" not in item_schema["properties"]
 
 
 def test_provider_returns_dict_matching_receipt_ocr_response() -> None:

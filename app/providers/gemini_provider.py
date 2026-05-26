@@ -36,6 +36,11 @@ For store name extraction:
   return null/unknown for the store name.
 - Do not invent or infer a store name.
 
+For item names:
+- Return the receipt text item name as raw_name when visible.
+- A normalized item name is only an OCR candidate for later database-side product
+  matching. It is not a database product master name.
+
 Do not include product IDs, category IDs, database IDs, inventory updates, or recipe
 recommendations.
 """.strip()

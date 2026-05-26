@@ -164,9 +164,10 @@ Successful response:
 }
 ```
 
-成功時の `status` は常に `needs_confirmation` です。読み取れない値は推測せず `null` にします。合計金額と明細合計の不一致など、致命的でない不確実性はエラーではなく `warnings` に入ります。
+成功時の `status` は常に `needs_confirmation` です。読み取れない値は推測せず `null` にします。合計金額と明細合計の不一致など、致命的でない不確実性はエラーではなく `warnings` に入ります。合計不一致の決定的な判定はサービス層で一度だけ行い、AI 側には積極的に同じ警告を出させません。
 
 この API は `product_id`、`category_id`、`receipt_id`、`receipt_item_id` を返しません。ID 解決と確定登録は database API 側の責務です。
+`normalized_name` は OCR が推定した商品名候補であり、database API の `products.name` と一致する保証はありません。
 
 ## Frontend Usage
 
@@ -231,7 +232,7 @@ Item fields:
 | Field | Type | Notes |
 |---|---|---|
 | `raw_name` | `string \| null` | レシート上の商品名 |
-| `normalized_name` | `string \| null` | 商品名の正規化候補 |
+| `normalized_name` | `string \| null` | OCR が推定した商品名候補。DB 正式商品名とは限らない |
 | `category_name` | `string \| null` | 会計カテゴリ名候補 |
 | `purchased_quantity` | `number \| null` | レシート上の購入単位の数量 |
 | `purchased_unit` | `string \| null` | レシート上の購入単位 |

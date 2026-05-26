@@ -119,6 +119,10 @@ Default is `10485760` bytes.
 
 `product_id` and `category_id` must not be returned by the OCR API because this service does not own database master data.
 
+`normalized_name` is an OCR-estimated product name candidate for later database-side matching. It is not guaranteed to match the database `products.name`.
+
+The service layer performs deterministic total-mismatch warning generation once after Structured Outputs validation. The AI normalization step should not proactively emit the same warning.
+
 The response must be suitable for frontend correction before final database registration.
 
 ## Manual live test example

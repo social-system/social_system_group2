@@ -80,6 +80,8 @@ def test_provider_builds_request_using_image_bytes_and_mime_type() -> None:
         client.received_prompt
     )
     assert "Do not invent or infer a store name" in client.received_prompt
+    assert "normalized item name is only an OCR candidate" in client.received_prompt
+    assert "not a database product master name" in client.received_prompt
     assert "total amount" in client.received_prompt
     assert "line totals" in client.received_prompt
 

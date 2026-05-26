@@ -8,6 +8,8 @@ The API receives a receipt image and returns structured candidate data for front
 
 The API does not write to a database.
 The API does not decide final accounting records.
+The API does not decide `product_id` or `category_id`.
+The API does not store product aliases.
 The API does not directly update inventory.
 
 ## Core flow
@@ -102,7 +104,8 @@ If the actual codebase uses different current model names, keep model names conf
 
 The API should be conservative.
 If a field cannot be read safely, return `null` instead of inventing a value.
-If a total does not match item totals, do not fail the request. Return a warning.
+If a total does not match item totals, do not fail the request. The service layer
+adds a single warning after structured validation.
 If the image cannot be read as a receipt, return a stable error response.
 
 ## Privacy requirements

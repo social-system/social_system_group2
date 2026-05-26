@@ -40,7 +40,9 @@ All external providers must be mocked or faked.
 
 ### Business rules
 
-- Mismatched total and item sum returns warning, not failure
+- Mismatched total and item sum returns one service-layer warning, not failure
+- OCR responses include `store_name`
+- OCR responses do not include `product_id` or `category_id`
 - `confidence` must be between 0 and 1
 - Negative amount fails validation
 - Invalid date format fails validation

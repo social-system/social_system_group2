@@ -15,7 +15,8 @@ The JSON schema must:
 - Mark all fields as required
 - Use `null` for unknown optional values
 - Avoid invented values
-- Return warnings for uncertain or inconsistent values
+- Return warnings for uncertain values
+- Do not include `product_id` or `category_id`
 
 ## Top-level schema shape
 
@@ -80,11 +81,14 @@ Type: array of strings.
 
 Use warnings for non-fatal uncertainty, such as:
 
-- Total amount and item sum do not match
 - Date is unclear
 - Store name is unclear
 - Some lines were ignored
 - Unit conversion is uncertain
+
+Do not proactively add a warning only because the top-level total and item sum may
+not match. That deterministic check is performed once in the service layer after
+Structured Outputs validation to avoid duplicate warnings.
 
 ## Item schema
 
@@ -118,7 +122,9 @@ Do not over-normalize this field.
 
 Type: `string | null`
 
-A simplified item name candidate for later product matching.
+A simplified item name candidate for later database-side product matching.
+This is not the database product master name and is not guaranteed to match
+`products.name`.
 Examples:
 
 | raw_name | normalized_name |
@@ -252,4 +258,4 @@ Pydantic validation must check:
 - `warnings` is always a list
 - item `warnings` is always a list
 
-If item totals do not match the top-level total, do not reject the response. Add a warning.
+If item totals do not match the top-level total, do not reject the response. The service layer adds a single top-level warning after validation.

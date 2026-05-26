@@ -26,6 +26,10 @@ name alone. If the store name is unclear or low confidence, return null and add
 a warning.
 Return warnings for uncertainty, ignored lines, unclear dates, unclear totals, or
 unit conversion uncertainty.
+Do not proactively warn about a mismatch between total_amount and item line totals;
+the service layer performs that deterministic check once after validation.
+Treat normalized_name as an OCR-estimated product name candidate only. It is not a
+database product master name and does not have to match products.name.
 Do not include database IDs, product IDs, category IDs, inventory updates, recipe
 recommendations, authentication data, or any fields outside the schema.
 """.strip()

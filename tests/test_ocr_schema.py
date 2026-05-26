@@ -50,6 +50,59 @@ def test_receipt_ocr_response_accepts_store_name() -> None:
     assert response.store_name == "Sample Store"
 
 
+def test_receipt_ocr_response_keeps_normalized_name_as_candidate() -> None:
+    response = ReceiptOcrResponse(
+        status="needs_confirmation",
+        store_name="Sample Store",
+        purchased_at="2026-05-12",
+        total_amount=238,
+        items=[
+            ReceiptOcrItem(
+                raw_name="タマゴM 10コ",
+                normalized_name="たまご",
+                category_name="食費",
+                purchased_quantity=1,
+                purchased_unit="パック",
+                base_quantity=10,
+                base_unit="個",
+                unit_price=238,
+                line_total=238,
+                is_inventory_target=True,
+                confidence=0.82,
+                warnings=[],
+            )
+        ],
+        warnings=[],
+    )
+
+    dumped = response.model_dump()
+    assert dumped["items"][0]["normalized_name"] == "たまご"
+    assert "product_id" not in dumped["items"][0]
+    assert "category_id" not in dumped["items"][0]
+
+
+@pytest.mark.parametrize("forbidden_field", ["product_id", "category_id"])
+def test_database_ids_are_rejected_from_item_schema(forbidden_field: str) -> None:
+    data = {
+        "raw_name": "egg",
+        "normalized_name": "egg",
+        "category_name": "food",
+        "purchased_quantity": 1,
+        "purchased_unit": "pack",
+        "base_quantity": 10,
+        "base_unit": "piece",
+        "unit_price": 100,
+        "line_total": 100,
+        "is_inventory_target": True,
+        "confidence": 0.9,
+        "warnings": [],
+        forbidden_field: 1,
+    }
+
+    with pytest.raises(ValidationError):
+        ReceiptOcrItem.model_validate(data)
+
+
 def test_invalid_status_fails() -> None:
     with pytest.raises(ValidationError):
         ReceiptOcrResponse(status="confirmed")

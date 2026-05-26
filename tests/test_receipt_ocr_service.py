@@ -202,6 +202,19 @@ def test_total_mismatch_adds_warning_and_ignores_null_line_totals() -> None:
     assert TOTAL_MISMATCH_WARNING in response.warnings
 
 
+def test_total_mismatch_warning_is_not_duplicated() -> None:
+    data = valid_structured_response()
+    data["total_amount"] = 150
+    data["warnings"] = [TOTAL_MISMATCH_WARNING]
+    service = make_service(openai_provider=FakeOpenAIProvider(data))
+
+    response = asyncio.run(
+        service.extract_receipt(image_bytes=b"receipt-image", mime_type="image/webp")
+    )
+
+    assert response.warnings.count(TOTAL_MISMATCH_WARNING) == 1
+
+
 def test_invalid_structured_response_raises_validation_error() -> None:
     service = make_service(
         openai_provider=FakeOpenAIProvider(
