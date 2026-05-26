@@ -57,7 +57,6 @@ class InventoryBatch(Base):
     receipt_item_id: Mapped[int | None] = mapped_column(
         ForeignKey("receipt_items.id"),
         nullable=True,
-        unique=True,
         index=True,
     )
     location_id: Mapped[int | None] = mapped_column(

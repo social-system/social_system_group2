@@ -181,24 +181,6 @@ def apply_receipt_to_inventory(
             )
             continue
 
-        existing_batch = db.scalars(
-            select(InventoryBatch).where(InventoryBatch.receipt_item_id == item.id)
-        ).first()
-        if existing_batch is not None:
-            response_items.append(
-                InventoryReceiptApplyItemResponse(
-                    receipt_item_id=item.id,
-                    product_id=item.product_id,
-                    product_name=product_name,
-                    quantity=item.base_quantity,
-                    unit=item.base_unit,
-                    batch_id=existing_batch.id,
-                    status="skipped",
-                    reason="already_applied",
-                )
-            )
-            continue
-
         batch = InventoryBatch(
             product_id=item.product_id,
             receipt_item_id=item.id,
