@@ -63,33 +63,46 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
     }
   };
 
-  const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
+const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
     try {
+      // 1. 画像URLからBlob（バイナリデータ）を取得
       const res = await fetch(imageUrl);
       const blob = await res.blob();
+
+      // 2. ★ Blobの実態（MIMEタイプ）に合わせて、適切な拡張子のファイル名を作る
+      let fileName = "capture.jpg";
+      if (blob.type === "image/png") fileName = "capture.png";
+      if (blob.type === "image/webp") fileName = "capture.webp";
+
+      // 3. FormDataの組み立て
       const formData = new FormData();
-      formData.append("file", blob, "capture.jpg");
+      formData.append("file", blob, fileName); // 仕様通りのキー名「file」
 
       try {
+        console.log(`OCR解析リクエスト送信中... (${fileName}, タイプ: ${blob.type})`);
+        
         const response = await fetch(`${kakeibo_URL}/ocr/receipts/extract`, {
           method: "POST",
+          // ※重要※ headers: { "Content-Type": "..." } は絶対に書かない（今のままで大正解）
           body: formData,
         });
 
         if (!response.ok) {
-          console.error("--- サーバー解析エラー発生 ---");
+          const errDetail = await response.json().catch(() => ({}));
+          console.error("--- サーバー解析エラー発生 ---", response.status, errDetail);
           return getMockData();
         }
 
         const data = await response.json();
+        console.log("OCR解析に成功しました:", data);
         return data as ExtractedData;
 
       } catch (networkError) {
-        console.error("--- サーバー通信不能を検知 ---");
+        console.error("--- サーバー通信不能を検知 ---", networkError);
         return getMockData();
       }
     } catch (err) {
-      console.error("解析失敗:", err);
+      console.error("解析失敗（前処理またはBlob変換エラー）:", err);
       return getMockData();
     }
   };

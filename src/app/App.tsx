@@ -212,12 +212,42 @@ export default function App() {
     const targetDate = date instanceof Date ? date : new Date(date);
     return Number(targetDate.toISOString().split('T')[0].replace(/-/g, ''));
   };
-  useEffect(() => {
+
+
+useEffect(() => {
     if (!settings.isSetupComplete) {
       setShowSettings(true);
     }
     fetchExpenses();
+    fetchInventoryBalances(); // ★アプリ起動時に在庫も直接取得する
   }, []);
+
+// ★新設: サーバーから直接最新の在庫一覧を取得してStateを同期する
+  const fetchInventoryBalances = async () => {
+    try {
+      const res = await fetch(`${kakeibo_URL}/inventory/balances?include_zero=false`);
+      if (!res.ok) throw new Error(`在庫取得エラー: ${res.status}`);
+      const data = await res.json();
+
+      if (data && Array.isArray(data.items)) {
+        // サーバーから返ってきた最新の在庫配列でStateを上書き
+        //（最後の1個を削除して空配列 `[]` になった場合も正しく画面が空になります）
+        const formattedInventory = data.items.map((item: any) => ({
+          id: item.product_id.toString(), // product_id を一意のIDとして利用
+          name: item.normalized_name || "不明な食材",
+          quantity: item.current_quantity,
+          unit: item.base_unit || "個",
+          category: "食材在庫"
+        }));
+        setInventory(formattedInventory);
+      } else {
+        setInventory([]);
+      }
+    } catch (err) {
+      console.error("在庫一覧の取得に失敗しました:", err);
+      setInventory([]);
+    }
+  };
 
   // 取得した全レシート明細の `is_inventory_target` からフロントの在庫状態を完全同期するロジック
   const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
@@ -376,10 +406,9 @@ export default function App() {
       try {
         if (!requestBody) return;
 
-        // 1. フロントに飛んできたデータを、一旦 prepare が受け取れる最低限の形にする
-        let dateStr = "2026-05-26"; // prepareは YYYY-MM-DD の文字列を期待
+        // 1. フロントのデータを prepare が受け取れる文字列日付にする
+        let dateStr = "2026-05-26";
         if (requestBody.purchased_at) {
-          // 万が一数値型(20260526)でフォームから来たら、ハイフン付き文字列に戻す
           const s = String(requestBody.purchased_at);
           if (s.length === 8) {
             dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
@@ -412,7 +441,7 @@ export default function App() {
           warnings: []
         };
 
-        // 2. まずは /receipts/prepare を叩いてデータを整形・補完してもらう
+        // 2. /receipts/prepare を叩いて、商品IDや単位を補完してもらう
         console.log("prepareに送信する下書き:", prepareBody);
         const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
           method: "POST",
@@ -422,36 +451,66 @@ export default function App() {
 
         if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
         const prepareData = await prepareResponse.json();
-
-        // 3. バックエンドが綺麗に補完してくれた「receipt」を取り出す
         const finalizedReceipt = prepareData.receipt;
 
-        if (!finalizedReceipt) {
-          throw new Error("サーバーからのデータ整形結果(receipt)が空でした。");
+        if (!finalizedReceipt || !Array.isArray(finalizedReceipt.items)) {
+          throw new Error("サーバーからの自動補完結果が不正です。");
         }
 
-        // ★ 1円にするガード処理（おねだり補正）をここから完全に消去しました ★
+        // 3. ★修正ポイント: 家計簿には登録せず、在庫追加用（inventory/batches）のデータを作成する
+        // 新仕様の POST /inventory/batches に適合する配列形式へ変換
+        const inventoryBatchesPayload = finalizedReceipt.items
+          .filter((item: any) => item.is_inventory_target !== false) // 在庫対象のみ
+          .map((item: any) => {
+            // purchased_at を YYYYMMDD の整数に変換
+            const rawDate = finalizedReceipt.purchased_at || 20260526;
+            const cleanDate = typeof rawDate === 'string' ? Number(rawDate.replace(/[-/]/g, '')) : Number(rawDate);
 
-        // 4. 補完された完璧なデータで /receipts に本登録を要請
-        console.log("receiptsに本登録する確定ペイロード:", finalizedReceipt);
-        const response = await fetch(`${kakeibo_URL}/receipts`, {  
+            return {
+              product_id: Number(item.product_id) || 1,
+              original_quantity: Number(item.base_quantity) || Number(item.purchased_quantity) || 1,
+              unit: item.base_unit || item.purchased_unit || "個",
+              purchased_at: cleanDate,
+              // 任意項目（不要なら省略可）
+              store_name: finalizedReceipt.store_name || "手動在庫追加",
+              receipt_id: null // 家計簿を通さないためnull
+            };
+          });
+
+        if (inventoryBatchesPayload.length === 0) {
+          alert("在庫対象の食材がありません。");
+          return;
+        }
+
+        // 4. 在庫直接追加API（POST /inventory/batches）にリクエストを送信
+        console.log("在庫直接追加へ送信するペイロード:", inventoryBatchesPayload);
+        const response = await fetch(`${kakeibo_URL}/inventory/batches`, {  
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(finalizedReceipt),
+          body: JSON.stringify(inventoryBatchesPayload), // 配列のまま送信
         });
 
         if (!response.ok) {
           const errorDetail = await response.json().catch(() => ({}));
-          console.error("本登録のサーバーエラー詳細:", errorDetail);
-          throw new Error(`本登録エラー: ${response.status}`);
+          console.error("在庫追加のサーバーエラー詳細:", errorDetail);
+          throw new Error(`在庫追加エラー: ${response.status}`);
         }
 
-        // 5. 画面の再読み込み
+        // 5. 家計簿(expenses)ではなく、在庫一覧(inventory)を更新する
+        if (typeof (window as any).fetchInventory === "function") {
+          await (window as any).fetchInventory();
+        }
+// 5. 家計簿ではなく、直接最新の在庫一覧をサーバーから再取得する
+        await fetchInventoryBalances(); 
+        // 念のため家計簿側もリフレッシュ
         await fetchExpenses(); 
-        alert("手動の在庫・レシート登録に成功しました！");
+
+        alert("在庫の手動追加に成功しました！");
+
+
       } catch (err) {
         console.error("送信プロセス失敗:", err);
-        alert("サーバーへの保存に失敗しました。仕様に沿った自動補完ができませんでした。");
+        alert("サーバーへの保存に失敗しました。");
       }
     };
 
@@ -562,8 +621,11 @@ export default function App() {
         throw new Error(`サーバーエラー: ${response.status}`);
       }
 
-      // 5. 削除成功後、画面の家計簿と現在の在庫データを両方最新にする
+// 5. 削除成功後、画面の家計簿と現在の在庫データを両方最新にする
       await fetchExpenses();
+      await fetchInventoryBalances(); // ★ここを fetchInventoryBalances() に変更
+      
+    
       
       // もしアプリ内に最新在庫を再取得する関数（fetchInventoryなど）があればここで一緒に呼ぶ
       if (typeof (window as any).fetchInventory === "function") {
