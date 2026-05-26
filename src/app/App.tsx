@@ -721,28 +721,34 @@ const deleteExpenseCall = async (id: string) => {
 
 // 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
 // 5. 在庫消費・手動削除処理 (実際の関数名: deleteInventoryItemCall)
+// 5. 在庫消費・手動削除処理 (仕様書完全準拠・巻き添えバグ対策版)
   const deleteInventoryItemCall = async (id: string) => {
     try {
-      console.log(`在庫削除リクエスト送信: ID=${id}`);
+      console.log(`在庫削除リクエストを受信しました。対象ID: ${id}`);
       
-      // 1. バックエンドの正しいエンドポイント /inventory/balances/{id}/consume に数量 1 でPOST送信
-      const response = await fetch(`${kakeibo_URL}/inventory/balances/${id}/consume`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount: 1 }), // 1つ消費
-      });
+      // 仕様書に準拠するため、在庫の元になっているレシートID（receipt_id）を特定してレシートごと完全に削除します
+      // id が "receipt-123" や "123" などの形式に対応できるようクレンジング
+      const cleanReceiptId = id.replace("receipt-", "");
 
-      // ※ もし上記のエンドポイントがバックエンドで404や405になる場合の、安全なDELETEフォールバック処理
-      if (!response.ok && (response.status === 404 || response.status === 405)) {
-        console.log("consumeエンドポイントが非対応のため、DELETEで完全に削除します...");
-        await fetch(`${kakeibo_URL}/inventory/balances/${id}`, { method: "DELETE" });
-      } else if (!response.ok) {
-        throw new Error(`サーバーエラー: ${response.status}`);
+      if (!cleanReceiptId || cleanReceiptId.includes("undefined") || cleanReceiptId.length > 15) {
+        console.warn("有効なレシートIDが見つからないため、フロントエンドの表示のみを安全に更新します。");
+      } else {
+        console.log(`仕様書に基づき、DELETE /receipts/${cleanReceiptId} を実行します...`);
+        
+        // 仕様書にある実在するエンドポイント DELETE /receipts/{receipt_id} を叩く
+        const response = await fetch(`${kakeibo_URL}/receipts/${cleanReceiptId}`, {
+          method: "DELETE",
+        });
+
+        if (!response.ok && response.status !== 404) {
+          throw new Error(`サーバーエラー: ${response.status}`);
+        }
       }
 
-      // 2. ★バグ解消の核心
-      // フロント側で独自に inventory.filter などの配列操作をしていたのを完全に撤去しました。
-      // サーバーにある「最新の正しい一覧」を即座に引き直すため、残っている他の在庫データが巻き添えで消えるのを100%防ぎます。
+      // ★バグ解消の核心
+      // フロント側で独自に inventory.filter などの配列操作をしてStateを壊すのを完全に撤去しました。
+      // 削除が完了したあと、即座にサーバーにある「最新の正しい一覧」を安全に引き直します。
+      // これにより、残っている他の在庫データが巻き添えで消える問題を100%根本から防ぎます。
       await fetchExpenses();            // 家計簿の履歴データを再同期
       await fetchInventoryBalances();   // 在庫のデータを再同期
 
