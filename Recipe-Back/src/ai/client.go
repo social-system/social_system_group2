@@ -63,13 +63,14 @@ func (c *openaiClient) SuggestRecipes(ctx context.Context, req SuggestRequest) (
 func (c *openaiClient) callAPI(ctx context.Context, req SuggestRequest) ([]Recipe, error) {
 	userMsg := BuildUserMessage(req)
 	sysPrompt := BuildSystemPrompt()
+	speedOptimizedPrompt := sysPrompt + "\n【重要】回答速度を最優先してください。Web検索を行う場合は最低限のクエリに留め、即座に結論を簡潔に出力してください。"
 
 	resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
 		Model:        openai.ResponsesModel(c.model),
-		Instructions: openai.String(sysPrompt),
+		Instructions: openai.String(speedOptimizedPrompt),
 		Input:        responses.ResponseNewParamsInputUnion{OfString: openai.String(userMsg)},
 		Reasoning: openai.ReasoningParam{
-			Effort: openai.ReasoningEffortMedium,
+			Effort: openai.ReasoningEffortLow,
 		},
 		Tools: []responses.ToolUnionParam{
 			responses.ToolParamOfWebSearchPreview(responses.WebSearchToolTypeWebSearchPreview),
