@@ -402,117 +402,203 @@ useEffect(() => {
   };
 
 
-  const submitReceiptPayload = async (requestBody: any) => {
-      try {
-        if (!requestBody) return;
+//  const submitReceiptPayload = async (requestBody: any) => {
+//      try {
+//        if (!requestBody) return;
+//
+//        // 1. フロントのデータを prepare が受け取れる文字列日付にする
+//        let dateStr = "2026-05-26";
+//        if (requestBody.purchased_at) {
+//          const s = String(requestBody.purchased_at);
+//          if (s.length === 8) {
+//            dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
+//          } else if (s.includes("-")) {
+//            dateStr = s;
+//          }
+//        }
+//
+//        const prepareBody = {
+//          status: "needs_confirmation",
+//          store_name: requestBody.store_name || "手動在庫追加",
+//          purchased_at: dateStr, 
+//          total_amount: Number(requestBody.total_amount) || 0,
+//          items: Array.isArray(requestBody.items) 
+//            ? requestBody.items.map((item: any) => ({
+//                raw_name: item.raw_name || "手動登録商品",
+//                normalized_name: item.normalized_name || item.raw_name || "手動登録商品",
+//                category_name: "食費", 
+//                purchased_quantity: Number(item.purchased_quantity) || 1,
+//                purchased_unit: item.purchased_unit || "個",
+//                base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
+//                base_unit: item.base_unit || item.purchased_unit || "個",
+//                unit_price: Number(item.unit_price) || 0,
+//                line_total: Number(item.line_total) || 0,
+//                is_inventory_target: item.is_inventory_target ?? true,
+//                confidence: 1.0,
+//                warnings: []
+//              }))
+//            : [],
+//          warnings: []
+//        };
+//
+//        // 2. /receipts/prepare を叩いて、商品IDや単位を補完してもらう
+//        console.log("prepareに送信する下書き:", prepareBody);
+//        const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
+//          method: "POST",
+//          headers: { "Content-Type": "application/json" },
+//          body: JSON.stringify(prepareBody),
+//        });
+//
+//        if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
+//        const prepareData = await prepareResponse.json();
+//        const finalizedReceipt = prepareData.receipt;
+//
+//        if (!finalizedReceipt || !Array.isArray(finalizedReceipt.items)) {
+//          throw new Error("サーバーからの自動補完結果が不正です。");
+//        }
+//
+//        // 3. ★修正ポイント: 家計簿には登録せず、在庫追加用（inventory/batches）のデータを作成する
+//        // 新仕様の POST /inventory/batches に適合する配列形式へ変換
+//        const inventoryBatchesPayload = finalizedReceipt.items
+//          .filter((item: any) => item.is_inventory_target !== false) // 在庫対象のみ
+//          .map((item: any) => {
+//            // purchased_at を YYYYMMDD の整数に変換
+//            const rawDate = finalizedReceipt.purchased_at || 20260526;
+//            const cleanDate = typeof rawDate === 'string' ? Number(rawDate.replace(/[-/]/g, '')) : Number(rawDate);
+//
+//            return {
+//              product_id: Number(item.product_id) || 1,
+//              original_quantity: Number(item.base_quantity) || Number(item.purchased_quantity) || 1,
+//              unit: item.base_unit || item.purchased_unit || "個",
+//              purchased_at: cleanDate,
+//              // 任意項目（不要なら省略可）
+//              store_name: finalizedReceipt.store_name || "手動在庫追加",
+//              receipt_id: null // 家計簿を通さないためnull
+//            };
+//          });
+//
+//        if (inventoryBatchesPayload.length === 0) {
+//          alert("在庫対象の食材がありません。");
+//          return;
+//        }
+//
+//        // 4. 在庫直接追加API（POST /inventory/batches）にリクエストを送信
+//        console.log("在庫直接追加へ送信するペイロード:", inventoryBatchesPayload);
+//        const response = await fetch(`${kakeibo_URL}/inventory/batches`, {  
+//          method: "POST",
+//          headers: { "Content-Type": "application/json" },
+//          body: JSON.stringify(inventoryBatchesPayload), // 配列のまま送信
+//        });
+//
+//        if (!response.ok) {
+//          const errorDetail = await response.json().catch(() => ({}));
+//          console.error("在庫追加のサーバーエラー詳細:", errorDetail);
+//          throw new Error(`在庫追加エラー: ${response.status}`);
+//        }
+//
+//        // 5. 家計簿(expenses)ではなく、在庫一覧(inventory)を更新する
+//        if (typeof (window as any).fetchInventory === "function") {
+//          await (window as any).fetchInventory();
+//        }
+//// 5. 家計簿ではなく、直接最新の在庫一覧をサーバーから再取得する
+//        await fetchInventoryBalances(); 
+//        // 念のため家計簿側もリフレッシュ
+//        await fetchExpenses(); 
+//
+//        alert("在庫の手動追加に成功しました！");
+//
+//
+//      } catch (err) {
+//        console.error("送信プロセス失敗:", err);
+//        alert("サーバーへの保存に失敗しました。");
+//      }
+//    };
 
-        // 1. フロントのデータを prepare が受け取れる文字列日付にする
-        let dateStr = "2026-05-26";
-        if (requestBody.purchased_at) {
-          const s = String(requestBody.purchased_at);
-          if (s.length === 8) {
-            dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
-          } else if (s.includes("-")) {
-            dateStr = s;
-          }
+const submitReceiptPayload = async (requestBody: any) => {
+    try {
+      if (!requestBody) return;
+
+      // 1. フロントのデータを prepare が受け取れる文字列日付にする
+      let dateStr = "2026-05-26";
+      if (requestBody.purchased_at) {
+        const s = String(requestBody.purchased_at);
+        if (s.length === 8) {
+          dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
+        } else if (s.includes("-")) {
+          dateStr = s;
         }
-
-        const prepareBody = {
-          status: "needs_confirmation",
-          store_name: requestBody.store_name || "手動在庫追加",
-          purchased_at: dateStr, 
-          total_amount: Number(requestBody.total_amount) || 0,
-          items: Array.isArray(requestBody.items) 
-            ? requestBody.items.map((item: any) => ({
-                raw_name: item.raw_name || "手動登録商品",
-                normalized_name: item.normalized_name || item.raw_name || "手動登録商品",
-                category_name: "食費", 
-                purchased_quantity: Number(item.purchased_quantity) || 1,
-                purchased_unit: item.purchased_unit || "個",
-                base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
-                base_unit: item.base_unit || item.purchased_unit || "個",
-                unit_price: Number(item.unit_price) || 0,
-                line_total: Number(item.line_total) || 0,
-                is_inventory_target: item.is_inventory_target ?? true,
-                confidence: 1.0,
-                warnings: []
-              }))
-            : [],
-          warnings: []
-        };
-
-        // 2. /receipts/prepare を叩いて、商品IDや単位を補完してもらう
-        console.log("prepareに送信する下書き:", prepareBody);
-        const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(prepareBody),
-        });
-
-        if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
-        const prepareData = await prepareResponse.json();
-        const finalizedReceipt = prepareData.receipt;
-
-        if (!finalizedReceipt || !Array.isArray(finalizedReceipt.items)) {
-          throw new Error("サーバーからの自動補完結果が不正です。");
-        }
-
-        // 3. ★修正ポイント: 家計簿には登録せず、在庫追加用（inventory/batches）のデータを作成する
-        // 新仕様の POST /inventory/batches に適合する配列形式へ変換
-        const inventoryBatchesPayload = finalizedReceipt.items
-          .filter((item: any) => item.is_inventory_target !== false) // 在庫対象のみ
-          .map((item: any) => {
-            // purchased_at を YYYYMMDD の整数に変換
-            const rawDate = finalizedReceipt.purchased_at || 20260526;
-            const cleanDate = typeof rawDate === 'string' ? Number(rawDate.replace(/[-/]/g, '')) : Number(rawDate);
-
-            return {
-              product_id: Number(item.product_id) || 1,
-              original_quantity: Number(item.base_quantity) || Number(item.purchased_quantity) || 1,
-              unit: item.base_unit || item.purchased_unit || "個",
-              purchased_at: cleanDate,
-              // 任意項目（不要なら省略可）
-              store_name: finalizedReceipt.store_name || "手動在庫追加",
-              receipt_id: null // 家計簿を通さないためnull
-            };
-          });
-
-        if (inventoryBatchesPayload.length === 0) {
-          alert("在庫対象の食材がありません。");
-          return;
-        }
-
-        // 4. 在庫直接追加API（POST /inventory/batches）にリクエストを送信
-        console.log("在庫直接追加へ送信するペイロード:", inventoryBatchesPayload);
-        const response = await fetch(`${kakeibo_URL}/inventory/batches`, {  
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(inventoryBatchesPayload), // 配列のまま送信
-        });
-
-        if (!response.ok) {
-          const errorDetail = await response.json().catch(() => ({}));
-          console.error("在庫追加のサーバーエラー詳細:", errorDetail);
-          throw new Error(`在庫追加エラー: ${response.status}`);
-        }
-
-        // 5. 家計簿(expenses)ではなく、在庫一覧(inventory)を更新する
-        if (typeof (window as any).fetchInventory === "function") {
-          await (window as any).fetchInventory();
-        }
-// 5. 家計簿ではなく、直接最新の在庫一覧をサーバーから再取得する
-        await fetchInventoryBalances(); 
-        // 念のため家計簿側もリフレッシュ
-        await fetchExpenses(); 
-
-        alert("在庫の手動追加に成功しました！");
-
-
-      } catch (err) {
-        console.error("送信プロセス失敗:", err);
-        alert("サーバーへの保存に失敗しました。");
       }
-    };
+
+      const prepareBody = {
+        status: "needs_confirmation",
+        store_name: requestBody.store_name || "手動在庫追加",
+        purchased_at: dateStr, 
+        total_amount: Number(requestBody.total_amount) || 0,
+        items: Array.isArray(requestBody.items) 
+          ? requestBody.items.map((item: any) => ({
+              raw_name: item.raw_name || "手動登録商品",
+              normalized_name: item.normalized_name || item.raw_name || "手動登録商品",
+              category_name: "食費", 
+              purchased_quantity: Number(item.purchased_quantity) || 1,
+              purchased_unit: item.purchased_unit || "個",
+              base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
+              base_unit: item.base_unit || item.purchased_unit || "個",
+              unit_price: Number(item.unit_price) || 0,
+              line_total: Number(item.line_total) || 0,
+              is_inventory_target: true, // ★手動在庫追加フォームからなので、常に強制で true にする
+              confidence: 1.0,
+              warnings: []
+            }))
+          : [],
+        warnings: []
+      };
+
+      // 2. /receipts/prepare を叩いて、商品IDや単位を補完してもらう
+      console.log("prepareに送信する下書き:", prepareBody);
+      const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prepareBody),
+      });
+
+      if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
+      const prepareData = await prepareResponse.json();
+      const finalizedReceipt = prepareData.receipt;
+
+      if (!finalizedReceipt || !Array.isArray(finalizedReceipt.items)) {
+        throw new Error("サーバーからの自動補完結果が不正です。");
+      }
+
+      // ★重要：AIやバックエンドが「在庫対象外(false)」と判定してきた場合でも、
+      // ユーザーが手動追加したがっているため、強制的に true へ書き換える
+      finalizedReceipt.items = finalizedReceipt.items.map((item: any) => ({
+        ...item,
+        is_inventory_target: true
+      }));
+
+      // 3. ★修正ポイント: エラーになる inventory/batches は使わず、本登録 API (POST /receipts) に送信する
+      console.log("在庫手動追加のためレシート本登録へ送信:", finalizedReceipt);
+      const response = await fetch(`${kakeibo_URL}/receipts`, {  
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(finalizedReceipt), // オブジェクト形式で送信
+      });
+
+      if (!response.ok) {
+        const errorDetail = await response.json().catch(() => ({}));
+        console.error("レシート本登録のサーバーエラー詳細:", errorDetail);
+        throw new Error(`サーバー登録エラー: ${response.status}`);
+      }
+
+      // 4. 最新のデータを再読み込みして画面を更新する
+      await fetchExpenses(); 
+
+      alert("在庫の手動追加に成功しました！");
+    } catch (err) {
+      console.error("送信プロセス失敗:", err);
+      alert("サーバーへの保存に失敗しました。");
+    }
+  };
 
   // 手動家計簿追加
 // 5. 手動家計簿データ追加 (直接 POST /receipts を叩くように修正)
