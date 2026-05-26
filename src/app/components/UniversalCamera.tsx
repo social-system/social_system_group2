@@ -4,8 +4,8 @@ import type { InventoryItem } from '../App';
 
 
 //const kakeibo_URL = "http://localhost:8000";
-//const kakeibo_URL = "https://social-system-group2.onrender.com";
-const kakeibo_URL = "https://social-system-group2-3.onrender.com";
+const kakeibo_URL = "https://social-system-group2.onrender.com";
+//const kakeibo_URL = "https://social-system-group2-3.onrender.com";
 
 interface ExtractedData {
   store_name?: string;
@@ -140,6 +140,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
   // 登録ボタンを押した時の処理（POST /receipts の入れ子構造に完全準拠）
 // 登録ボタンを押した時の処理（クリーンな下書きを prepare に投げてから本登録する仕様に修正）
 // 登録ボタンを押した時の処理（手動追加と同じ項目・構造に揃えて prepare に投げる）
+// 登録ボタンを押した時の処理（prepareの返却値をそのまま本登録へ流す形に修正）
   const handleConfirmCall = async () => {
     if (!capturedImage) return;
     setIsProcessing(true);
@@ -156,7 +157,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
         }
       }
 
-      // 2. 手動追加フォーム(App.tsx)と100%同じ形の下書きデータを組み立てる
+      // 2. 手動追加フォーム(App.tsx)と完全に鏡合わせの下書きデータを組み立てる
       const prepareBody = {
         status: "needs_confirmation",
         store_name: (extractedData.store_name || "カメラ登録店舗").trim(),
@@ -166,10 +167,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
           ? extractedData.items.map((item: any) => ({
               raw_name: (item.raw_name || "不明な商品").trim(),
               normalized_name: (item.normalized_name || item.raw_name || "不明な商品").trim(),
-              
-              // ★エラー対策: category_name だけでなく、手動登録に習って必要な項目をバックエンドに引き渡す
-              category_name: "食費", 
-              
+              category_name: "食費", // バックエンドの自動解決用のヒント
               purchased_quantity: Number(item.purchased_quantity) || 1,
               purchased_unit: item.purchased_unit || "個",
               base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
@@ -184,7 +182,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
         warnings: []
       };
 
-      console.log("カメラ用 prepare に送信する完全なデータ:", prepareBody);
+      console.log("カメラ用 prepare に送信するデータ:", prepareBody);
 
       // 3. /receipts/prepare を叩いて自動解決してもらう
       const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
@@ -206,20 +204,19 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
         throw new Error("サーバーからの自動補完結果(receipt)が空でした。");
       }
 
-      // ★セーフティガード: バックエンドが万が一 category_id を解決できず null で返してきた場合、
-      // 本登録での「カテゴリーidがない」エラーを防ぐためにデフォルトの1（または仮の番号）を埋め込む
+      // ★ 修正ポイント: 存在しないID「1」への強制上書きを完全に撤去！
+      // バックエンドが補完してくれた中身（product_idやcategory_idがnullであってもそのまま）を尊重し、
+      // 手動追加の時と全く同じように、is_inventory_target だけ確実に true にします。
       if (Array.isArray(finalReceiptPayload.items)) {
         finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => ({
           ...item,
-          product_id: item.product_id ?? 1,   // 未解決なら 1
-          category_id: item.category_id ?? 1, // ★ここ！ここが null だと本登録で弾かれるため 1 を保証する
-          is_inventory_target: true           // 強制全通し
+          is_inventory_target: true // 強制で在庫対象にするガードのみ残す
         }));
       }
 
-      console.log("サーバー側で完全に補完・修正されたレシートを本登録へ送信:", finalReceiptPayload);
+      console.log("サーバー側で補完されたデータをそのまま本登録へ送信:", finalReceiptPayload);
 
-      // 4. 完成した完璧なデータを /receipts に POST して本登録
+      // 4. 完成したデータを /receipts に POST して本登録
       const response = await fetch(`${kakeibo_URL}/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -240,7 +237,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
       stopCamera();
     } catch (err) {
       console.error("登録エラー:", err);
-      alert("データベースへの登録に失敗しました。「カテゴリーid」の自動解決ができませんでした。");
+      alert("データベースへの登録に失敗しました。");
     } finally {
       setIsProcessing(false);
     }
