@@ -23,6 +23,190 @@ OCR API
 
 OCR API は `product_id` や `category_id` を決めません。OCR の `normalized_name` は商品名候補であり、DB の正式な `products.name` と一致する保証はありません。DB 側では `products.name_key` と `product_aliases.alias_key` を使って表記揺れを吸収し、未解決の商品は確認画面でユーザーが選択して `POST /product-aliases` により学習させます。
 
+## OCR・フロントエンド・データベースの詳細フロー
+
+OCR から DB 保存までの責務は次のように分けます。
+
+```text
+レシート画像
+  -> OCR API
+      画像から文字、金額、日付、商品名候補を抽出する
+      product_id / category_id / alias は決めない
+      OCR 信頼度、警告、metadata は仮データとして返す
+  -> フロントエンド
+      OCR 仮データを受け取る
+      そのまま POST /receipts へ送らず、POST /receipts/prepare へ送る
+  -> DB API POST /receipts/prepare
+      日付形式を YYYY-MM-DD から YYYYMMDD へ変換する
+      OCR 専用項目を登録用 receipt から除外する
+      raw_name / normalized_name を products と product_aliases に照合する
+      product_id と category_id を補完する
+      base_quantity / base_unit の補完可否を判定する
+      未解決明細と確認課題を返す
+  -> フロントエンド確認画面
+      ユーザーが購入日、店舗名、合計、明細、カテゴリ、在庫数量を確認する
+      未解決商品は既存商品から選ぶ、または商品を新規作成する
+      ユーザー確認済みの表記揺れを POST /product-aliases で学習させる
+  -> DB API POST /receipts
+      ユーザー確認済みデータだけを保存する
+      items_total と adjustment_amount をサーバー側で計算する
+  -> 必要に応じて在庫・価格比較・レシピ提案で利用する
+```
+
+### OCR API の役割
+
+OCR API は、画像から読み取れた値を仮データとして返します。
+
+OCR API が返してよいもの:
+
+```text
+store_name
+purchased_at
+total_amount
+raw_name
+normalized_name 候補
+category_name 候補
+purchased_quantity / purchased_unit
+base_quantity / base_unit 候補
+unit_price
+line_total
+is_inventory_target 候補
+confidence
+warnings
+ocr_metadata
+```
+
+OCR API が決めないもの:
+
+```text
+product_id
+category_id
+product_aliases
+products.name
+products.default_base_unit
+```
+
+`confidence`、`warnings`、`ocr_metadata` は確認や自動登録可否の判断材料です。確定レシートの保存データとしては扱いません。
+
+### POST /receipts/prepare の役割
+
+`POST /receipts/prepare` は OCR 仮データを DB 登録前の確認用データへ変換します。この API はレシートを保存しません。
+
+主な変換:
+
+| 入力 | prepare 後 |
+| --- | --- |
+| `purchased_at: "2026-05-12"` | `purchased_at: 20260512` |
+| `confidence`, `warnings`, `ocr_metadata` | 登録用 `receipt` から除外 |
+| OCR の `normalized_name` | 商品解決できた場合は `products.name` に寄せる |
+| `category_name` | 解決できる場合は `category_id` に変換 |
+| `raw_name` / `normalized_name` | `product_id` 解決に使う |
+| `purchased_quantity` / `purchased_unit` | `base_quantity` / `base_unit` 補完に使う |
+
+商品解決では、次のキーを使います。
+
+```text
+products.name_key
+product_aliases.alias_key
+```
+
+解決できた明細は `item_resolutions[].resolution_status = "resolved"` になり、`product_id` と正式な `product_name` が返ります。解決できない明細は `product_id = null` のまま `unresolved_items` に含まれます。
+
+### product_aliases の役割
+
+`product_aliases` は、レシート上の表記や OCR が出した表記を商品マスタへ対応させるテーブルです。
+
+例:
+
+| レシート/OCR 上の表記 `alias_name` | 照合用 `alias_key` | 商品マスタ `products.name` |
+| --- | --- | --- |
+| `タマゴM 10コ` | `たまごm10こ` | `卵` |
+| `白たまご` | `白たまご` | `卵` |
+| `牛乳1000ml` | `牛乳1000ml` | `牛乳` |
+| `絹とうふ 300g` | `絹とうふ300g` | `豆腐` |
+
+`alias_key` は検索・照合用に正規化したキーです。空白や表記揺れを吸収し、同じ別名を同じ商品に結びつけるために使います。
+
+alias の `source` は自動解決に使えるかどうかを分けます。
+
+| source | 自動解決 | 候補検索 | 用途 |
+| --- | --- | --- | --- |
+| `user_confirmed` | 可 | 可 | ユーザーが確認画面で選択した対応 |
+| `seed` | 可 | 可 | 初期データ・テストデータとして安全に登録した対応 |
+| `admin` | 可 | 可 | 管理者が確認して登録した対応 |
+| `ocr_suggested` | 不可 | 可 | OCR や AI が推定しただけの候補 |
+
+`POST /receipts/prepare` の自動解決では、`is_active = true` かつ `source` が `user_confirmed`、`seed`、`admin` の alias だけを使います。`ocr_suggested` は候補として表示できますが、ユーザー確認なしに `resolved` にはしません。`is_active = false` の alias は自動解決にも候補検索にも使いません。
+
+未解決商品をユーザーが確認した場合、フロントエンドは次の順で対応します。
+
+```text
+1. GET /products/search で既存商品を探す
+2. 商品があれば、ユーザーが商品を選択する
+3. 商品がなければ、POST /products で商品マスタを作る
+4. 確認した raw_name を POST /product-aliases で product_id に紐づける
+5. 次回以降の POST /receipts/prepare では alias から自動解決される
+```
+
+同じ `alias_key` が同じ `product_id` に登録済みなら冪等に成功します。別の `product_id` に紐づいている場合は `409 Conflict` になり、誤った表記学習を防ぎます。
+
+### フロントエンド確認画面の役割
+
+フロントエンド確認画面では、`POST /receipts/prepare` の `receipt` を編集対象にします。OCR の元レスポンスを直接編集・登録するのではなく、DB API が返した確認用データを基準にします。
+
+最低限確認する項目:
+
+```text
+購入日 purchased_at
+店舗名 store_name
+合計金額 total_amount
+レシート上の商品名 raw_name
+アプリ内の商品名 normalized_name
+商品マスタ product_id
+カテゴリ category_id
+購入時数量 purchased_quantity
+購入時単位 purchased_unit
+共通数量 base_quantity
+共通単位 base_unit
+単価 unit_price
+明細行合計 line_total
+在庫対象 is_inventory_target
+```
+
+在庫対象の明細では、次の項目が確定してから `POST /receipts` へ送ります。
+
+```text
+normalized_name
+base_quantity
+base_unit
+```
+
+`product_id` は MVP では nullable ですが、最安店表示や安定した在庫・レシピ連携には重要です。可能な限り確認画面で既存商品に紐づけ、必要に応じて alias を登録します。
+
+### POST /receipts の役割
+
+`POST /receipts` はユーザー確認済みデータだけを保存します。OCR 信頼度や警告、OCR metadata は保存対象ではありません。
+
+保存時にサーバーが計算する値:
+
+```text
+items_total = sum(line_total)
+adjustment_amount = total_amount - items_total
+```
+
+`total_amount == items_total` は必須にしません。実レシートでは、割引、ポイント、税、レジ袋、OCR 漏れなどで差額が発生するためです。
+
+保存されたデータは次のように使われます。
+
+| 利用先 | 主に使う項目 |
+| --- | --- |
+| 家計簿 | `purchased_at`, `store_name`, `total_amount`, `items_total`, `adjustment_amount`, `category_id` |
+| 在庫管理 | `product_id`, `normalized_name`, `base_quantity`, `base_unit`, `is_inventory_target` |
+| 価格比較 | `product_id`, `store_name`, `line_total`, `base_quantity`, `base_unit` |
+| AI レシピ提案 | 在庫 API から取得できる商品名、数量、単位、期限 |
+
+価格比較の `GET /prices/cheapest` は、`receipt_items.product_id` が一致する履歴を対象にします。`product_id` が未解決の明細は購入履歴として保存できますが、商品別の最安店検索には使えません。
+
 ## 責務
 
 この API は、家計簿、在庫管理、AI レシピ提案などの外部機能が共通で使える購入履歴と在庫情報を提供します。
