@@ -24,6 +24,14 @@ app.add_middleware(
 
 app.include_router(ocr_router)
 
+@app.get("/")
+def root() -> dict[str, str]:
+    return {
+        "message": "Receipt OCR API is running",
+        "health": "/health",
+        "docs": "/docs",
+        "ocr": "/ocr/receipts/extract",
+    }
 
 @app.get("/health")
 def health() -> dict[str, str]:
