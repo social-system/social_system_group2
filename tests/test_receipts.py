@@ -1,3 +1,6 @@
+from decimal import Decimal
+
+from app.inventory.models import InventoryBatch, InventoryMovement
 from app.receipts.models import AccountingCategory, Product
 
 
@@ -60,6 +63,84 @@ def test_create_receipt(client):
         "adjustment_amount": 0,
         "item_count": 1,
     }
+
+
+def test_create_receipt_auto_updates_inventory_batches(client, db_session):
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+
+    create_receipt(
+        client,
+        product_id=product.id,
+        base_quantity=1000,
+        base_unit="ml",
+    )
+
+    batches_response = client.get("/inventory/batches")
+
+    assert batches_response.status_code == 200
+    assert batches_response.json()["items"] == [
+        {
+            "batch_id": batches_response.json()["items"][0]["batch_id"],
+            "product_id": product.id,
+            "product_name": "milk",
+            "initial_quantity": "1000.00",
+            "current_quantity": "1000.00",
+            "unit": "ml",
+            "location_id": None,
+            "location_name": None,
+            "purchased_at": "2026-04-28",
+            "expires_at": None,
+            "status": "active",
+            "receipt_item_id": batches_response.json()["items"][0]["receipt_item_id"],
+        }
+    ]
+    batch = db_session.query(InventoryBatch).one()
+    movement = db_session.query(InventoryMovement).one()
+    assert batch.receipt_item_id is not None
+    assert batch.current_quantity == Decimal("1000.00")
+    assert movement.batch_id == batch.id
+    assert movement.quantity_delta == Decimal("1000.00")
+    assert movement.movement_type == "purchase"
+
+
+def test_inventory_movement_updates_batches_visible_from_get_batches(client, db_session):
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+    create_receipt(
+        client,
+        product_id=product.id,
+        base_quantity=1000,
+        base_unit="ml",
+    )
+
+    response = client.post(
+        "/inventory/movements",
+        json={
+            "product_id": product.id,
+            "movement_type": "consume",
+            "quantity": "250.00",
+            "unit": "ml",
+        },
+    )
+    batches_response = client.get("/inventory/batches")
+
+    assert response.status_code == 200
+    assert batches_response.status_code == 200
+    assert batches_response.json()["items"][0]["current_quantity"] == "750.00"
+    assert batches_response.json()["items"][0]["status"] == "active"
 
 
 def test_create_receipt_allows_total_amount_and_items_total_mismatch(client):

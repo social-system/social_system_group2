@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.common.date import format_yyyymmdd
+from app.crud.inventory import apply_receipt_to_inventory
 from app.crud.receipts_create import create_receipt
 from app.db.session import get_db
 from app.schemas.receipts_prepare import (
@@ -10,6 +11,7 @@ from app.schemas.receipts_prepare import (
     ReceiptPrepareRequest,
     ReceiptPrepareResponse,
 )
+from app.schemas.inventory_requests import InventoryReceiptApplyRequest
 from app.schemas.receipts_requests import ReceiptCreate
 from app.schemas.receipts_responses import ReceiptSummaryResponse
 from app.services.operations_metrics import record_receipt_prepare_metrics
@@ -20,6 +22,30 @@ router = APIRouter(
     prefix="/receipts",
     tags=["receipts"],
 )
+
+
+def _receipt_has_auto_applicable_inventory_items(receipt) -> bool:
+    return any(
+        item.is_inventory_target
+        and item.product_id is not None
+        and item.base_quantity is not None
+        and item.base_quantity > 0
+        and item.base_unit is not None
+        for item in receipt.items
+    )
+
+
+def _auto_apply_receipt_inventory(db: Session, receipt) -> None:
+    if not _receipt_has_auto_applicable_inventory_items(receipt):
+        return
+
+    apply_receipt_to_inventory(
+        db,
+        receipt.id,
+        InventoryReceiptApplyRequest(
+            idempotency_key=f"receipt:{receipt.id}:auto-apply-inventory",
+        ),
+    )
 
 
 @router.post("/prepare", response_model=ReceiptPrepareResponse)
@@ -60,6 +86,7 @@ def post_receipt_auto_create(
             )
             receipt = create_receipt(db, receipt_payload)
             receipt.source = "ocr_auto_registered"
+            _auto_apply_receipt_inventory(db, receipt)
             db.commit()
             db.refresh(receipt)
             receipt_id = receipt.id
@@ -109,6 +136,7 @@ def post_receipt(
 ):
     try:
         receipt = create_receipt(db, payload)
+        _auto_apply_receipt_inventory(db, receipt)
         db.commit()
         db.refresh(receipt)
     except ValueError as e:
