@@ -4,8 +4,8 @@ import type { InventoryItem } from '../App';
 
 
 //const kakeibo_URL = "http://localhost:8000";
-const kakeibo_URL = "https://social-system-group2.onrender.com";
-//const kakeibo_URL = "https://social-system-group2-3.onrender.com";
+const kakeibo_ocr = "https://social-system-group2.onrender.com";
+const kakeibo_URL = "https://social-system-group2-3.onrender.com";
 
 interface ExtractedData {
   store_name?: string;
@@ -81,7 +81,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
       try {
         console.log(`OCR解析リクエスト送信中... (${fileName}, タイプ: ${blob.type})`);
         
-        const response = await fetch(`${kakeibo_URL}/ocr/receipts/extract`, {
+        const response = await fetch(`${kakeibo_ocr}/ocr/receipts/extract`, {
           method: "POST",
           // ※重要※ headers: { "Content-Type": "..." } は絶対に書かない（今のままで大正解）
           body: formData,
