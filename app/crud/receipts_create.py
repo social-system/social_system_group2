@@ -2,7 +2,8 @@ from sqlalchemy.orm import Session
 
 from app.common.date import parse_yyyymmdd
 from app.receipts.models import AccountingCategory, Product, Receipt, ReceiptItem
-from app.schemas.receipts_requests import ReceiptCreate
+from app.schemas.receipts_requests import ReceiptCreate, ReceiptItemCreate
+from app.services.product_normalization import normalize_product_key
 from app.services.product_resolution import ProductResolutionInput, resolve_product
 
 
@@ -46,6 +47,44 @@ def _resolve_missing_product(
     return db.get(Product, resolution.product_id)
 
 
+def _blank_to_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    stripped = value.strip()
+    return stripped or None
+
+
+def _get_or_create_product_for_item(db: Session, item_data: ReceiptItemCreate) -> Product:
+    name = _blank_to_none(item_data.normalized_name) or item_data.raw_name
+    name_key = normalize_product_key(name)
+    if name_key is None:
+        raise ValueError("product name could not be generated")
+
+    product = _resolve_missing_product(
+        db,
+        raw_name=item_data.raw_name,
+        normalized_name=item_data.normalized_name,
+    )
+    if product is not None:
+        return product
+
+    default_base_unit = (
+        _blank_to_none(item_data.base_unit)
+        or _blank_to_none(item_data.purchased_unit)
+        or "unknown"
+    )
+    product = Product(
+        name=name.strip(),
+        name_key=name_key,
+        default_base_unit=default_base_unit,
+        default_category_id=item_data.category_id,
+        is_inventory_target=item_data.is_inventory_target,
+    )
+    db.add(product)
+    db.flush()
+    return product
+
+
 def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
     products = _get_referenced_products(db, data)
     _validate_category_ids(db, data)
@@ -65,12 +104,8 @@ def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
         product = products.get(item_data.product_id) if item_data.product_id is not None else None
         product_was_auto_resolved = False
         if product is None and item_data.product_id is None:
-            product = _resolve_missing_product(
-                db,
-                raw_name=item_data.raw_name,
-                normalized_name=item_data.normalized_name,
-            )
-            product_was_auto_resolved = product is not None
+            product = _get_or_create_product_for_item(db, item_data)
+            product_was_auto_resolved = True
 
         normalized_name = item_data.normalized_name
         category_id = item_data.category_id

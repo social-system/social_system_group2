@@ -79,7 +79,7 @@ OCR API は、不明な値を `null` として返してよい。
 
 DB API に送る時点では、在庫対象データに必要な項目を埋める。
 
-`POST /receipts` は、`product_id = null` の明細について保存前にもう一度商品解決を試みる。ただし使うのは `POST /receipts/prepare` と同じ安全な完全一致だけである。信頼済み alias または商品名キーに一致しない場合、候補が存在しても `product_id = null` のまま保存する。
+`POST /receipts` は、`product_id = null` の明細について保存前にもう一度商品解決を試みる。信頼済み alias または商品名キーに一致しない場合は、新しい `products` レコードを作成し、その `id` を `receipt_items.product_id` に保存する。
 
 例:
 
@@ -170,7 +170,7 @@ OCR API が `ocr_metadata` を返す場合、DB API はそれを確定データ�
 price_per_base_unit = line_total / base_quantity
 ```
 
-そのため、最安店表示に使うには `product_id`、`store_name`、`base_quantity`、`base_unit` が必要である。`product_id` 未解決の商品は購入履歴として保存できるが、最安店検索の対象にはならない。
+そのため、最安店表示に使うには `product_id`、`store_name`、`base_quantity`、`base_unit` が必要である。`POST /receipts` 経由で保存された明細は、既存商品に解決されるか新規商品が自動作成されるため、原則として `product_id` を持つ。
 
 ## フロントエンド確認画面で必要な処理
 

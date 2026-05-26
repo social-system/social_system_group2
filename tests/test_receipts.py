@@ -226,6 +226,7 @@ def test_get_receipt(client):
 
     assert response.status_code == 200
     body = response.json()
+    item = body["items"][0]
     assert body == {
         "id": created["id"],
         "purchased_at": 20260428,
@@ -235,10 +236,10 @@ def test_get_receipt(client):
         "adjustment_amount": 0,
         "items": [
             {
-                "id": body["items"][0]["id"],
+                "id": item["id"],
                 "raw_name": "bread",
                 "normalized_name": "milk",
-                "product_id": None,
+                "product_id": item["product_id"],
                 "category_id": None,
                 "purchased_quantity": "1.00",
                 "purchased_unit": "本",
@@ -250,6 +251,7 @@ def test_get_receipt(client):
             }
         ],
     }
+    assert item["product_id"] is not None
 
 
 def test_get_receipt_returns_404_for_missing_id(client):
@@ -330,7 +332,13 @@ def test_list_receipts_uses_category_filter(client, db_session):
         raw_name="milk",
         category_id=category.id,
     )
-    create_receipt(client, total_amount=200, raw_name="soap", is_inventory_target=False)
+    create_receipt(
+        client,
+        total_amount=200,
+        raw_name="soap",
+        normalized_name="soap",
+        is_inventory_target=False,
+    )
 
     response = client.get(f"/receipts?category_id={category.id}")
 
@@ -436,7 +444,7 @@ def test_create_receipt_accepts_prepare_receipt(client, db_session):
     assert item["base_unit"] == "ml"
 
 
-def test_create_receipt_accepts_null_product_id_for_purchase_history(client):
+def test_create_receipt_auto_creates_product_for_null_product_id(client, db_session):
     response = client.post(
         "/receipts",
         json=make_receipt_payload(product_id=None),
@@ -444,7 +452,13 @@ def test_create_receipt_accepts_null_product_id_for_purchase_history(client):
 
     assert response.status_code == 201
     detail = client.get(f"/receipts/{response.json()['id']}").json()
-    assert detail["items"][0]["product_id"] is None
+    item = detail["items"][0]
+    assert item["product_id"] is not None
+    product = db_session.get(Product, item["product_id"])
+    assert product is not None
+    assert product.name == "milk"
+    assert product.default_base_unit == "ml"
+    assert product.is_inventory_target is True
 
 
 def test_create_receipt_auto_resolves_null_product_id_from_trusted_alias(client, db_session):
@@ -490,17 +504,17 @@ def test_create_receipt_auto_resolves_null_product_id_from_trusted_alias(client,
     assert db_session.query(InventoryBatch).one().product_id == product.id
 
 
-def test_create_receipt_does_not_auto_resolve_null_product_id_from_candidate_only(
+def test_create_receipt_auto_creates_product_when_only_candidate_exists(
     client,
     db_session,
 ):
-    product = Product(
+    existing_product = Product(
         name="milk",
         name_key="milk",
         default_base_unit="ml",
         is_inventory_target=True,
     )
-    db_session.add(product)
+    db_session.add(existing_product)
     db_session.commit()
 
     response = client.post(
@@ -514,7 +528,13 @@ def test_create_receipt_does_not_auto_resolve_null_product_id_from_candidate_onl
 
     assert response.status_code == 201
     detail = client.get(f"/receipts/{response.json()['id']}").json()
-    assert detail["items"][0]["product_id"] is None
+    item = detail["items"][0]
+    assert item["product_id"] is not None
+    assert item["product_id"] != existing_product.id
+    product = db_session.get(Product, item["product_id"])
+    assert product is not None
+    assert product.name == "unknown"
+    assert product.default_base_unit == "ml"
 
 
 def test_create_receipt_fills_product_defaults(client, db_session):

@@ -269,16 +269,28 @@ adjustment_amount = total_amount - items_total
 
 ### Product resolution on create
 
-`product_id = null` の明細が送られた場合、`POST /receipts` は保存前に `POST /receipts/prepare` と同じ安全な完全一致ルールで `product_id` の補完を試みる。
+`product_id = null` の明細が送られた場合、`POST /receipts` は保存前に `product_id` の補完を試みる。
 
-自動補完に使うもの:
+まず既存商品への解決を試みる。
 
 ```text
 active かつ source が user_confirmed / seed / admin の product_aliases.alias_key 完全一致
 products.name_key 完全一致
 ```
 
-候補検索や部分一致だけでは `product_id` を保存しない。解決できない場合は `product_id = null` のまま購入履歴として保存する。
+既存商品に解決できない場合は、新しい `products` レコードを作成し、その `id` を `receipt_items.product_id` に保存する。
+
+自動作成する商品の値:
+
+| products column | source |
+| --- | --- |
+| `name` | `normalized_name` があればそれを使い、なければ `raw_name` |
+| `name_key` | `name` からサーバー側で生成 |
+| `default_base_unit` | `base_unit` があればそれを使い、なければ `purchased_unit`、どちらもなければ `unknown` |
+| `default_category_id` | 明細の `category_id` |
+| `is_inventory_target` | 明細の `is_inventory_target` |
+
+この処理により、`POST /receipts` で保存された明細は原則として `product_id` を持つ。
 
 ### Success response
 

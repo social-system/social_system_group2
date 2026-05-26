@@ -80,9 +80,9 @@ products 1 --- * product_aliases
 products 1 --- * product_unit_conversions
 ```
 
-`receipt_items.product_id` は MVP では nullable とする。
+`receipt_items.product_id` は DB 定義上 nullable とする。
 
-理由は、OCR・フロント確認時点で商品マスタに未登録の商品が出るためである。ただし、在庫管理やレシピ提案を安定させるには、将来的に `product_id` を埋める運用が望ましい。
+理由は、移行前データや直接 DB 操作では未解決の商品が残る可能性があるためである。ただし、`POST /receipts` 経由の保存では、既存商品に解決できない明細に対して新しい `products` レコードを自動作成し、原則として `product_id` を埋める。
 
 ## receipts
 

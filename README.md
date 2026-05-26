@@ -110,7 +110,7 @@ products.name_key
 product_aliases.alias_key
 ```
 
-解決できた明細は `item_resolutions[].resolution_status = "resolved"` になり、`product_id` と正式な `product_name` が返ります。解決できない明細は `product_id = null` のまま `unresolved_items` に含まれます。
+解決できた明細は `item_resolutions[].resolution_status = "resolved"` になり、`product_id` と正式な `product_name` が返ります。解決できない明細は、確認用データでは `product_id = null` のまま `unresolved_items` に含まれます。
 
 ### product_aliases の役割
 
@@ -181,11 +181,13 @@ base_quantity
 base_unit
 ```
 
-`product_id` は MVP では nullable ですが、最安店表示や安定した在庫・レシピ連携には重要です。可能な限り確認画面で既存商品に紐づけ、必要に応じて alias を登録します。
+`product_id` は最安店表示や安定した在庫・レシピ連携に重要です。可能な限り確認画面で既存商品に紐づけ、必要に応じて alias を登録します。未解決のまま `POST /receipts` に送られた場合、DB API は既存商品への解決を再試行し、それでも解決できなければ新しい `products` レコードを作成して `product_id` を保存します。
 
 ### POST /receipts の役割
 
 `POST /receipts` はユーザー確認済みデータだけを保存します。OCR 信頼度や警告、OCR metadata は保存対象ではありません。
+
+`product_id = null` の明細は、保存前に商品解決を再実行します。信頼済み alias または `products.name_key` に一致すれば既存商品へ紐づけ、解決できない場合は `normalized_name` または `raw_name` から商品マスタを自動作成して、その `product_id` を保存します。
 
 保存時にサーバーが計算する値:
 
@@ -205,7 +207,7 @@ adjustment_amount = total_amount - items_total
 | 価格比較 | `product_id`, `store_name`, `line_total`, `base_quantity`, `base_unit` |
 | AI レシピ提案 | 在庫 API から取得できる商品名、数量、単位、期限 |
 
-価格比較の `GET /prices/cheapest` は、`receipt_items.product_id` が一致する履歴を対象にします。`product_id` が未解決の明細は購入履歴として保存できますが、商品別の最安店検索には使えません。
+価格比較の `GET /prices/cheapest` は、`receipt_items.product_id` が一致する履歴を対象にします。`POST /receipts` 経由で保存された明細は原則として `product_id` を持つため、`base_quantity`、`base_unit`、`store_name` が揃っていれば商品別の最安店検索に使えます。
 
 ## 責務
 

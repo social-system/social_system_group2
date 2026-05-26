@@ -163,7 +163,7 @@ def test_ocr_json_prepare_create_and_cheapest_flow(client, db_session):
     assert cheapest["base_quantity"] == "10.00"
 
 
-def test_unresolved_item_alias_learning_and_price_exclusion(client, db_session):
+def test_unresolved_item_auto_creates_product_then_alias_learning(client, db_session):
     make_category(db_session)
     product = make_product(db_session, name="味噌", unit="g")
 
@@ -184,7 +184,9 @@ def test_unresolved_item_alias_learning_and_price_exclusion(client, db_session):
     assert first_prepare["unresolved_items"] == [first_prepare["item_resolutions"][0]]
 
     first_detail = client.get(f"/receipts/{first_receipt['id']}").json()
-    assert first_detail["items"][0]["product_id"] is None
+    auto_created_product_id = first_detail["items"][0]["product_id"]
+    assert auto_created_product_id is not None
+    assert auto_created_product_id != product.id
 
     no_price_response = client.get(f"/prices/cheapest?product_id={product.id}")
     assert no_price_response.status_code == 200
