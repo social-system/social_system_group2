@@ -391,13 +391,13 @@ export default function App() {
         const prepareBody = {
           status: "needs_confirmation",
           store_name: requestBody.store_name || "手動在庫追加",
-          purchased_at: dateStr, // 文字列
+          purchased_at: dateStr, 
           total_amount: Number(requestBody.total_amount) || 0,
           items: Array.isArray(requestBody.items) 
             ? requestBody.items.map((item: any) => ({
                 raw_name: item.raw_name || "手動登録商品",
                 normalized_name: item.normalized_name || item.raw_name || "手動登録商品",
-                category_name: "食費", // バックエンドが自動解決するので文字列でOK
+                category_name: "食費", 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
                 base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
@@ -430,14 +430,7 @@ export default function App() {
           throw new Error("サーバーからのデータ整形結果(receipt)が空でした。");
         }
 
-        // ★新仕様バリデーション対策: もし金額が0以下になっていたら1円にしておくガード
-        if (finalizedReceipt.total_amount <= 0) finalizedReceipt.total_amount = 1;
-        if (Array.isArray(finalizedReceipt.items)) {
-          finalizedReceipt.items.forEach((item: any) => {
-            if (item.line_total <= 0) item.line_total = 1;
-            if (item.unit_price <= 0) item.unit_price = 1;
-          });
-        }
+        // ★ 1円にするガード処理（おねだり補正）をここから完全に消去しました ★
 
         // 4. 補完された完璧なデータで /receipts に本登録を要請
         console.log("receiptsに本登録する確定ペイロード:", finalizedReceipt);
@@ -533,16 +526,51 @@ export default function App() {
     await submitReceiptPayload(requestBody);
   };
 
-  // 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
-  const deleteInventoryItemCall = async (id: string) => {
-    const receiptId = id.includes("-") ? id.split("-")[0] : id;
+// 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
+  const deleteInventoryItemCall = async (id: string | number) => {
     try {
+      if (id === undefined || id === null) {
+        throw new Error("削除するIDが指定されていません");
+      }
+
+      // 1. ハイフンが含まれている場合は前方のレシートIDだけを抽出し、そうでなければそのまま文字列化
+      const idStr = String(id);
+      const rawReceiptId = idStr.includes("-") ? idStr.split("-")[0] : idStr;
+      
+      // 2. バックエンドの仕様に合わせて、IDを確実な「数値型」に変換する
+      const receiptId = Number(rawReceiptId);
+
+      // 万が一IDがNaN（数値に変換できない文字列）だった場合のセーフティガード
+      if (isNaN(receiptId)) {
+        console.error("無効なレシートID形式のため削除を中断しました:", id);
+        alert("無効なデータIDのため、削除できません。");
+        return;
+      }
+
+      console.log(`削除リクエスト送信中... URL: ${kakeibo_URL}/receipts/${receiptId}`);
+
+      // 3. DELETEリクエストの送信
       const response = await fetch(`${kakeibo_URL}/receipts/${receiptId}`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" }
       });
 
-      if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
+      // 4. エラーが起きた場合は詳細をコンソールに出す
+      if (!response.ok) {
+        const errorDetail = await response.json().catch(() => ({}));
+        console.error("サーバーが削除を拒否した詳細理由:", errorDetail);
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      // 5. 削除成功後、画面の家計簿と現在の在庫データを両方最新にする
       await fetchExpenses();
+      
+      // もしアプリ内に最新在庫を再取得する関数（fetchInventoryなど）があればここで一緒に呼ぶ
+      if (typeof (window as any).fetchInventory === "function") {
+        await (window as any).fetchInventory();
+      }
+      
+      alert("削除が完了しました！");
     } catch (err) {
       console.error("在庫データの削除に失敗しました:", err);
       alert("サーバーからのデータ削除に失敗しました。");
