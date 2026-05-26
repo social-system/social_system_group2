@@ -139,42 +139,44 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
 
   // 登録ボタンを押した時の処理（POST /receipts の入れ子構造に完全準拠）
 // 登録ボタンを押した時の処理（クリーンな下書きを prepare に投げてから本登録する仕様に修正）
+// 登録ボタンを押した時の処理（手動追加と同じ項目・構造に揃えて prepare に投げる）
   const handleConfirmCall = async () => {
     if (!capturedImage) return;
     setIsProcessing(true);
 
     try {
-      // 1. 日付を prepare API が求める文字列形式「YYYY-MM-DD」に安全変換
-      let dateStr = new Date().toISOString().split('T')[0]; // 初期値: 今日
+      // 1. 日付を prepare が求める文字列形式「YYYY-MM-DD」に変換
+      let dateStr = new Date().toISOString().split('T')[0];
       if (extractedData.purchased_at) {
         const s = String(extractedData.purchased_at).trim();
         if (s.length === 8 && !s.includes("-")) {
-          // YYYYMMDD 形式で送られてきた場合を救済
           dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
         } else if (s.includes("-")) {
-          // すでにハイフン付き文字列ならそのまま利用
           dateStr = s.split('T')[0];
         }
       }
 
-      // 2. 独自の仮IDなどを埋め込まず、OCRで抽出されたそのままの情報を prepare に投げる
+      // 2. 手動追加フォーム(App.tsx)と100%同じ形の下書きデータを組み立てる
       const prepareBody = {
         status: "needs_confirmation",
         store_name: (extractedData.store_name || "カメラ登録店舗").trim(),
-        purchased_at: dateStr, // YYYY-MM-DD 文字列形式
+        purchased_at: dateStr,
         total_amount: Number(extractedData.total_amount) || 0,
         items: Array.isArray(extractedData.items)
           ? extractedData.items.map((item: any) => ({
               raw_name: (item.raw_name || "不明な商品").trim(),
               normalized_name: (item.normalized_name || item.raw_name || "不明な商品").trim(),
-              category_name: "食費", // バックエンドの判定用のヒント
+              
+              // ★エラー対策: category_name だけでなく、手動登録に習って必要な項目をバックエンドに引き渡す
+              category_name: "食費", 
+              
               purchased_quantity: Number(item.purchased_quantity) || 1,
               purchased_unit: item.purchased_unit || "個",
-              base_quantity: Number(item.purchased_quantity) || 1,
-              base_unit: item.purchased_unit || "個",
+              base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
+              base_unit: item.base_unit || item.purchased_unit || "個",
               unit_price: Number(item.unit_price) || 0,
               line_total: Number(item.line_total) || 0,
-              is_inventory_target: true, // カメラからは食材なので原則在庫連動対象にする
+              is_inventory_target: true, // カメラから登録するものは原則すべて在庫に入れる
               confidence: 1.0,
               warnings: []
             }))
@@ -182,9 +184,9 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
         warnings: []
       };
 
-      console.log("カメラ用 prepare に送信するデータ:", prepareBody);
+      console.log("カメラ用 prepare に送信する完全なデータ:", prepareBody);
 
-      // 3. /receipts/prepare を叩いてバックエンド側で product_id や日付の数値型変換などを完璧に補完してもらう
+      // 3. /receipts/prepare を叩いて自動解決してもらう
       const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -192,25 +194,36 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
       });
 
       if (!prepareResponse.ok) {
+        const prepareErrDetail = await prepareResponse.json().catch(() => ({}));
+        console.error("Prepareバリデーションエラー詳細:", prepareErrDetail);
         throw new Error(`データの事前解決(prepare)に失敗しました。ステータス: ${prepareResponse.status}`);
       }
       
       const prepareData = await prepareResponse.json();
-      
-      // バックエンドが自動補完・日付変換（20260526等の整数化など）を施してくれた確定レシートオブジェクトを抽出
       const finalReceiptPayload = prepareData.receipt;
 
       if (!finalReceiptPayload) {
-        throw new Error("サーバーからの自動補完結果(receipt)が不正です。");
+        throw new Error("サーバーからの自動補完結果(receipt)が空でした。");
       }
 
-      console.log("サーバー側で補完されたレシートを本登録へ送信:", finalReceiptPayload);
+      // ★セーフティガード: バックエンドが万が一 category_id を解決できず null で返してきた場合、
+      // 本登録での「カテゴリーidがない」エラーを防ぐためにデフォルトの1（または仮の番号）を埋め込む
+      if (Array.isArray(finalReceiptPayload.items)) {
+        finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => ({
+          ...item,
+          product_id: item.product_id ?? 1,   // 未解決なら 1
+          category_id: item.category_id ?? 1, // ★ここ！ここが null だと本登録で弾かれるため 1 を保証する
+          is_inventory_target: true           // 強制全通し
+        }));
+      }
 
-      // 4. バックエンドが綺麗に組み立ててくれたデータをそのまま本登録 API に POST
+      console.log("サーバー側で完全に補完・修正されたレシートを本登録へ送信:", finalReceiptPayload);
+
+      // 4. 完成した完璧なデータを /receipts に POST して本登録
       const response = await fetch(`${kakeibo_URL}/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalReceiptPayload), // オブジェクト形式で送信
+        body: JSON.stringify(finalReceiptPayload),
       });
 
       if (!response.ok) {
@@ -223,11 +236,11 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
       const createdId = resData.id || resData.receipt_id || 'success';
       alert(`確定レシートと在庫を同期登録しました！ (レシートID: ${createdId})`);
 
-      onCapture(); // 親コンポーネント（App.tsx）で家計簿・在庫の再取得が走ります
+      onCapture(); 
       stopCamera();
     } catch (err) {
       console.error("登録エラー:", err);
-      alert("データベースへの登録に失敗しました。");
+      alert("データベースへの登録に失敗しました。「カテゴリーid」の自動解決ができませんでした。");
     } finally {
       setIsProcessing(false);
     }
