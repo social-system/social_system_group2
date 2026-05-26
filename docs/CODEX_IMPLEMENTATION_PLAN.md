@@ -6,6 +6,8 @@
 
 今回は開発初期のため、既存テーブルとの互換性を維持しない。
 
+この文書は初期 DB / API 実装の計画である。Render + Render PostgreSQL へのデプロイ対応は `docs/deploys/` の STEP 文書を優先する。
+
 ## Codex への前提指示
 
 作業前に必ず次を読む。
@@ -54,8 +56,8 @@ OCR 仮データ保存
 レシピ提案 API
 認証
 ユーザー管理
-Alembic 導入
-本番 DB 対応
+Alembic 導入（初期実装時は対象外。Render対応では `docs/deploys/` で扱う）
+本番 DB 対応（初期実装時は対象外。Render対応では `docs/deploys/` で扱う）
 ```
 
 ## 作業単位

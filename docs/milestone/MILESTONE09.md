@@ -24,13 +24,13 @@
 
 正常なレシートを登録できる。
 
-`receipt_total` と明細合計が違う場合は `400 Bad Request` になる。
+`total_amount` と明細合計が違っても登録できる。
 
-`num * amount` と `total` が違う場合は `400 Bad Request` になる。
+`unit_price * purchased_quantity` と `line_total` が違っても登録できる。
 
 `items` が空の場合は `422 Unprocessable Entity` になる。
 
-`date` が `20260230` の場合は `422 Unprocessable Entity` になる。
+`purchased_at` が `20260230` の場合は `422 Unprocessable Entity` になる。
 
 登録済みレシートを詳細取得できる。
 
@@ -56,7 +56,7 @@
 
 主要 API の異常系が確認されている。
 
-テスト実行で本番用 `receipts.db` が変更されない。
+テスト実行で開発用 `receipts.db` が変更されない。
 
 ## 実装上の注意
 

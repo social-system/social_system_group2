@@ -29,14 +29,17 @@
 ```json
 {
   "id": 1,
-  "receipt_total": 500,
+  "purchased_at": 20260428,
+  "store_name": "サンプルスーパー",
+  "total_amount": 500,
+  "items_total": 500,
+  "adjustment_amount": 0,
   "item_count": 2,
-  "date_min": 20260428,
-  "date_max": 20260428
+  "created_at": "2026-04-28T12:00:00"
 }
 ```
 
-現行 DB では日付が `receipt_items` にあるため、`date_min` と `date_max` を使う。
+現行 DB では購入日は `receipts.purchased_at` にあるため、一覧でもレシート単位の `purchased_at` を使う。
 
 ## 絞り込み仕様
 
@@ -46,9 +49,9 @@
 
 `date_from` と `date_to` は `YYYYMMDD` の整数として扱う。
 
-`date_from` が指定された場合、その日付以降の明細を含むレシートを対象にする。
+`date_from` が指定された場合、その日付以降に購入されたレシートを対象にする。
 
-`date_to` が指定された場合、その日付以前の明細を含むレシートを対象にする。
+`date_to` が指定された場合、その日付以前に購入されたレシートを対象にする。
 
 日付絞り込みの細かい境界条件は、API 実装時にも再確認する。
 

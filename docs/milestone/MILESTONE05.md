@@ -50,10 +50,13 @@ GET /receipts?date_from=20260401&date_to=20260430
 [
   {
     "id": 1,
-    "receipt_total": 500,
+    "purchased_at": 20260428,
+    "store_name": "サンプルスーパー",
+    "total_amount": 500,
+    "items_total": 500,
+    "adjustment_amount": 0,
     "item_count": 2,
-    "date_min": 20260428,
-    "date_max": 20260428
+    "created_at": "2026-04-28T12:00:00"
   }
 ]
 ```

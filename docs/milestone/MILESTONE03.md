@@ -27,16 +27,25 @@ MILESTONE02 で追加した CRUD 関数を使う。
 ```json
 {
   "id": 1,
-  "receipt_total": 500,
+  "purchased_at": 20260428,
+  "store_name": "サンプルスーパー",
+  "total_amount": 500,
+  "items_total": 500,
+  "adjustment_amount": 0,
   "items": [
     {
       "id": 1,
-      "item": "milk",
-      "num": 1,
-      "amount": 200,
-      "total": 200,
-      "date": 20260428,
-      "ingredients": 1
+      "raw_name": "milk",
+      "normalized_name": "牛乳",
+      "product_id": null,
+      "category_id": null,
+      "purchased_quantity": "1.00",
+      "purchased_unit": "本",
+      "base_quantity": "1000.00",
+      "base_unit": "ml",
+      "unit_price": 500,
+      "line_total": 500,
+      "is_inventory_target": true
     }
   ]
 }

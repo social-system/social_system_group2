@@ -4,17 +4,19 @@
 
 不正なレシートデータが DB に保存されないようにする。
 
-このマイルストーンでは、リクエストの形式として明らかに不正な値を Pydantic 側で弾き、レシートとして矛盾している値を CRUD 層で弾く。
+このマイルストーンでは、リクエストの形式として明らかに不正な値を Pydantic 側で弾き、業務ルールとして不正な値を CRUD 層で弾く。
 
 ## 対象範囲
 
 `items` を空配列にできないようにする。
 
-`date` が `YYYYMMDD` 形式の整数であり、かつ実在する日付であることを検証する。
+`purchased_at` が `YYYYMMDD` 形式の整数であり、かつ実在する日付であることを検証する。
 
-`num * amount == total` を検証する。
+`purchased_quantity` が 0 より大きいことを検証する。
 
-既存の `receipt_total == sum(items.total)` の検証は維持する。
+`line_total` と `total_amount` が 0 以上であることを検証する。
+
+`is_inventory_target = true` の場合は、`normalized_name`、`base_quantity`、`base_unit` を必須にする。
 
 ## 想定変更ファイル
 
@@ -30,7 +32,7 @@
 
 `items` は 1件以上必須とする。
 
-`date` は整数として受け取る。値は `YYYYMMDD` として解釈する。
+`purchased_at` は整数として受け取る。値は `YYYYMMDD` として解釈する。
 
 `20260428` は有効とする。
 
@@ -38,19 +40,25 @@
 
 `20261301` は無効とする。
 
-`num * amount != total` の場合は `400 Bad Request` とする。
+`purchased_quantity <= 0` の場合は `422 Unprocessable Entity` とする。
 
-`receipt_total != sum(items.total)` の場合は `400 Bad Request` とする。
+`line_total < 0` または `total_amount < 0` の場合は `422 Unprocessable Entity` とする。
+
+`is_inventory_target = true` なのに `normalized_name`、`base_quantity`、`base_unit` のいずれかが空の場合は `422 Unprocessable Entity` とする。
+
+`unit_price * purchased_quantity == line_total` は必須条件にしない。
+
+`total_amount == sum(line_total)` は必須条件にしない。
 
 ## 受け入れ条件
 
 空の `items` を送ると `422 Unprocessable Entity` になる。
 
-実在しない `date` を送ると `422 Unprocessable Entity` になる。
+実在しない `purchased_at` を送ると `422 Unprocessable Entity` になる。
 
-`num * amount` と `total` が一致しない場合は `400 Bad Request` になる。
+`purchased_quantity <= 0` の場合は `422 Unprocessable Entity` になる。
 
-`receipt_total` と明細合計が一致しない場合は、これまで通り `400 Bad Request` になる。
+`total_amount` と明細合計が一致しない場合でも登録できる。
 
 正常な登録リクエストは、これまで通り登録できる。
 

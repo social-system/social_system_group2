@@ -57,7 +57,8 @@ OCR API は `product_id` や `category_id` を決めません。OCR の `normali
 - Python 3.12+
 - FastAPI
 - SQLAlchemy
-- SQLite
+- SQLite（ローカル開発・テスト）
+- Render PostgreSQL（本番デプロイ方針）
 - Pydantic
 - pytest
 - uv
@@ -1026,11 +1027,84 @@ uv run ruff check .
 
 テストでは通常開発用の `receipts.db` を使わず、一時 SQLite DB に差し替えます。
 
+## Render デプロイ方針
+
+本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
+
+```text
+API: Render Web Service
+DB: Render PostgreSQL
+DB接続: Render PostgreSQL の Internal Database URL
+Schema管理: Alembic
+ローカル開発DB: SQLite継続可
+```
+
+Render 対応の実装手順は `docs/deploys/` に分割しています。作業時は `docs/deploys/README.md` の順番どおりに進めます。
+
+必要な環境変数:
+
+| 変数 | 内容 |
+| --- | --- |
+| `DATABASE_URL` | Render PostgreSQL の接続URL。本番では Internal Database URL を使う |
+| `APP_ENV` | 本番では `production` |
+| `CORS_ALLOW_ORIGINS` | フロントエンドURL。カンマ区切り可 |
+| `PORT` | Render が自動設定するため通常は手動設定不要 |
+
+Render 側の設定例:
+
+```text
+Build Command: pip install -e .
+Start Command: bash scripts/start_render.sh
+```
+
+起動スクリプトでは、次の順に実行する方針です。
+
+```text
+alembic upgrade head
+python -m scripts.seed_master_data
+uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
+```
+
+本番では `Base.metadata.create_all()` による自動テーブル作成を行いません。スキーマ変更は Alembic migration で管理します。
+
+Render 手動デプロイの流れ:
+
+```text
+1. RenderでPostgreSQLを作成する
+2. RenderでWeb Serviceを作成する
+3. GitHubリポジトリを接続する
+4. Build Commandを設定する
+5. Start Commandを設定する
+6. 環境変数を設定する
+7. Deployする
+8. / と /docs を確認する
+```
+
+疎通確認:
+
+```bash
+curl https://YOUR_RENDER_SERVICE.onrender.com/
+```
+
+期待値:
+
+```json
+{"status":"ok"}
+```
+
+よくある失敗:
+
+- `DATABASE_URL` が未設定で SQLite に接続してしまう
+- `CORS_ALLOW_ORIGINS` にフロントエンドURLが入っていない
+- `alembic upgrade head` が失敗してテーブルがない
+- Render の Start Command が `bash scripts/start_render.sh` になっていない
+- 実際の DB 接続URL、ユーザー名、パスワードを README や設定ファイルに直接書いてしまう
+
 ## 開発時の注意
 
 - 既存の `receipts.db` に実データが入っている可能性があるため、勝手に削除しないでください。
-- Alembic は導入していません。
-- 本番 DB 対応は未実装です。
+- Render + Render PostgreSQL 対応は `docs/deploys/` の手順に沿って進めます。
+- 本番 DB のスキーマ変更は Alembic migration で管理します。
 - GitHub へのプッシュは行いません。
 - ローカルコミットは利用者から明示された場合のみ行います。
 
@@ -1042,3 +1116,4 @@ uv run ruff check .
 - `docs/OCR_DB_INTERFACE.md`
 - `docs/CODEX_IMPLEMENTATION_PLAN.md`
 - `docs/INVENTORY_IMPLEMENTATION_SPEC.md`
+- `docs/deploys/README.md`
