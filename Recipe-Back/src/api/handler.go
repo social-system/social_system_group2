@@ -277,11 +277,35 @@ func parseAmount(amount string) (quantity string, unit string) {
 	return fmt.Sprintf("%.2f", val), unit
 }
 
+// normalizeName は商品名・材料名の表記ゆれ（カタカナ⇄ひらがな、余分な空白等）を平滑化する
+func normalizeName(s string) string {
+	s = strings.TrimSpace(s)
+	s = strings.ReplaceAll(s, "　", "")
+	return katakanaToHiragana(s)
+}
+
+func katakanaToHiragana(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		// カタカナ（U+30A1 - U+30F6）をひらがなに変換
+		if r >= '\u30A1' && r <= '\u30F6' {
+			r = r - 0x60
+		}
+		// 長音記号は除去（必要なら残すよう変更可）
+		if r == 'ー' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
 func convertRecipes(aiRecipes []ai.Recipe, inventory fridge.Inventory) []Recipe {
-	// product_name → fridge.Item のマップを構築
+	// product_name → fridge.Item のマップを構築（表記ゆれを正規化）
 	itemByName := make(map[string]fridge.Item, len(inventory.Items))
 	for _, item := range inventory.Items {
-		itemByName[item.ProductName] = item
+		key := normalizeName(item.ProductName)
+		itemByName[key] = item
 	}
 
 	result := make([]Recipe, 0, len(aiRecipes))
@@ -294,7 +318,7 @@ func convertRecipes(aiRecipes []ai.Recipe, inventory fridge.Inventory) []Recipe 
 				IsInFridge: ing.IsInFridge,
 			}
 			if ing.IsInFridge {
-				if item, ok := itemByName[ing.Name]; ok {
+				if item, ok := itemByName[normalizeName(ing.Name)]; ok {
 					apiIng.ProductID = item.ProductID
 					apiIng.Unit = item.Unit
 				}

@@ -6,7 +6,7 @@ gpt-5.4-nano
 
 ## effort
 
-Reasoning Medium
+Reasoning Low
 
 ## 概算
 
