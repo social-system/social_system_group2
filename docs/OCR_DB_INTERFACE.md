@@ -79,6 +79,8 @@ OCR API は、不明な値を `null` として返してよい。
 
 DB API に送る時点では、在庫対象データに必要な項目を埋める。
 
+`POST /receipts` は、`product_id = null` の明細について保存前にもう一度商品解決を試みる。ただし使うのは `POST /receipts/prepare` と同じ安全な完全一致だけである。信頼済み alias または商品名キーに一致しない場合、候補が存在しても `product_id = null` のまま保存する。
+
 例:
 
 ```json

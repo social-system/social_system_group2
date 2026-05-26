@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from app.common.date import parse_yyyymmdd
 from app.receipts.models import AccountingCategory, Product, Receipt, ReceiptItem
 from app.schemas.receipts_requests import ReceiptCreate
+from app.services.product_resolution import ProductResolutionInput, resolve_product
 
 
 def _get_referenced_products(db: Session, data: ReceiptCreate) -> dict[int, Product]:
@@ -25,6 +26,26 @@ def _validate_category_ids(db: Session, data: ReceiptCreate) -> None:
             raise ValueError(f"category_id does not exist: {category_id}")
 
 
+def _resolve_missing_product(
+    db: Session,
+    *,
+    raw_name: str,
+    normalized_name: str | None,
+) -> Product | None:
+    resolution = resolve_product(
+        db,
+        ProductResolutionInput(
+            product_id=None,
+            raw_name=raw_name,
+            normalized_name=normalized_name,
+        ),
+    )
+    if resolution.product_id is None:
+        return None
+
+    return db.get(Product, resolution.product_id)
+
+
 def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
     products = _get_referenced_products(db, data)
     _validate_category_ids(db, data)
@@ -42,15 +63,27 @@ def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
 
     for item_data in data.items:
         product = products.get(item_data.product_id) if item_data.product_id is not None else None
+        product_was_auto_resolved = False
+        if product is None and item_data.product_id is None:
+            product = _resolve_missing_product(
+                db,
+                raw_name=item_data.raw_name,
+                normalized_name=item_data.normalized_name,
+            )
+            product_was_auto_resolved = product is not None
+
         normalized_name = item_data.normalized_name
         category_id = item_data.category_id
         if product is not None:
-            normalized_name = normalized_name or product.name
+            if product_was_auto_resolved:
+                normalized_name = product.name
+            else:
+                normalized_name = normalized_name or product.name
             category_id = category_id or product.default_category_id
 
         receipt.items.append(
             ReceiptItem(
-                product_id=item_data.product_id,
+                product_id=product.id if product is not None else None,
                 category_id=category_id,
                 raw_name=item_data.raw_name,
                 normalized_name=normalized_name,

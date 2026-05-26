@@ -267,6 +267,19 @@ items_total = sum(item.line_total)
 adjustment_amount = total_amount - items_total
 ```
 
+### Product resolution on create
+
+`product_id = null` の明細が送られた場合、`POST /receipts` は保存前に `POST /receipts/prepare` と同じ安全な完全一致ルールで `product_id` の補完を試みる。
+
+自動補完に使うもの:
+
+```text
+active かつ source が user_confirmed / seed / admin の product_aliases.alias_key 完全一致
+products.name_key 完全一致
+```
+
+候補検索や部分一致だけでは `product_id` を保存しない。解決できない場合は `product_id = null` のまま購入履歴として保存する。
+
 ### Success response
 
 Status: `201 Created`

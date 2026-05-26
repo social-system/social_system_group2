@@ -1,7 +1,7 @@
 from decimal import Decimal
 
 from app.inventory.models import InventoryBatch, InventoryMovement
-from app.receipts.models import AccountingCategory, Product
+from app.receipts.models import AccountingCategory, Product, ProductAlias
 
 
 def make_receipt_payload(
@@ -440,6 +440,76 @@ def test_create_receipt_accepts_null_product_id_for_purchase_history(client):
     response = client.post(
         "/receipts",
         json=make_receipt_payload(product_id=None),
+    )
+
+    assert response.status_code == 201
+    detail = client.get(f"/receipts/{response.json()['id']}").json()
+    assert detail["items"][0]["product_id"] is None
+
+
+def test_create_receipt_auto_resolves_null_product_id_from_trusted_alias(client, db_session):
+    category = AccountingCategory(name="food", sort_order=1)
+    db_session.add(category)
+    db_session.flush()
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        default_category_id=category.id,
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.flush()
+    db_session.add(
+        ProductAlias(
+            product_id=product.id,
+            alias_name="milk bottle",
+            alias_key="milkbottle",
+            source="user_confirmed",
+            is_active=True,
+        )
+    )
+    db_session.commit()
+
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(
+            raw_name="milk bottle",
+            normalized_name="ミルク",
+            product_id=None,
+            category_id=None,
+        ),
+    )
+
+    assert response.status_code == 201
+    detail = client.get(f"/receipts/{response.json()['id']}").json()
+    item = detail["items"][0]
+    assert item["product_id"] == product.id
+    assert item["normalized_name"] == "milk"
+    assert item["category_id"] == category.id
+    assert db_session.query(InventoryBatch).one().product_id == product.id
+
+
+def test_create_receipt_does_not_auto_resolve_null_product_id_from_candidate_only(
+    client,
+    db_session,
+):
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(
+            raw_name="milk bottle",
+            normalized_name="unknown",
+            product_id=None,
+        ),
     )
 
     assert response.status_code == 201
