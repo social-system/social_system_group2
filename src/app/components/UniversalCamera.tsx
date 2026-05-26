@@ -62,35 +62,56 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
         if (isReceipt) {
           // レシートを検出した場合
+          const stores = ['スーパーA', 'スーパーB', 'スーパーC', '八百屋', 'ドラッグストア'];
+          const storeName = stores[Math.floor(Math.random() * stores.length)];
+
+          const purchaseItems = [
+            { name: '牛乳', price: 198, quantity: 1, unit: 'パック' },
+            { name: '卵', price: 248, quantity: 1, unit: 'パック' },
+            { name: 'パン', price: 158, quantity: 1, unit: '個' },
+            { name: 'トマト', price: 298, quantity: 3, unit: '個' },
+            { name: 'キャベツ', price: 178, quantity: 1, unit: '個' },
+            { name: '玉ねぎ', price: 120, quantity: 3, unit: '個' },
+            { name: 'にんじん', price: 98, quantity: 2, unit: '本' },
+          ];
+
+          // ランダムに2-4個の商品を選択
+          const numItems = Math.floor(Math.random() * 3) + 2;
+          const selectedItems = [];
+          const usedIndices = new Set<number>();
+
+          while (selectedItems.length < numItems) {
+            const randomIndex = Math.floor(Math.random() * purchaseItems.length);
+            if (!usedIndices.has(randomIndex)) {
+              selectedItems.push(purchaseItems[randomIndex]);
+              usedIndices.add(randomIndex);
+            }
+          }
+
+          const totalAmount = selectedItems.reduce((sum, item) => sum + item.price, 0);
+
           const mockExpense: Omit<Expense, 'id'> = {
-            amount: Math.floor(Math.random() * 5000) + 500,
-            category: ['食費', '日用品', '交通費'][Math.floor(Math.random() * 3)],
-            description: 'カメラで撮影した支出',
+            amount: totalAmount,
+            category: '食費',
+            description: `${storeName}での買い物`,
             date: new Date(),
             imageUrl,
+            storeName,
+            items: selectedItems,
           };
 
           // レシートから在庫品も検出
-          const mockItems: Omit<InventoryItem, 'id'>[] = [
-            {
-              name: ['牛乳', '卵', 'パン', 'トマト', 'キャベツ'][Math.floor(Math.random() * 5)],
-              quantity: Math.floor(Math.random() * 5) + 1,
-              unit: ['個', 'パック', '本'][Math.floor(Math.random() * 3)],
-              category: '食品',
-              imageUrl,
-            },
-            {
-              name: ['玉ねぎ', 'にんじん', 'じゃがいも', '豆腐'][Math.floor(Math.random() * 4)],
-              quantity: Math.floor(Math.random() * 3) + 1,
-              unit: ['個', 'パック'][Math.floor(Math.random() * 2)],
-              category: '食品',
-              imageUrl,
-            },
-          ];
+          const mockInventoryItems: Omit<InventoryItem, 'id'>[] = selectedItems.map((item) => ({
+            name: item.name,
+            quantity: item.quantity,
+            unit: item.unit,
+            category: '食品',
+            imageUrl,
+          }));
 
           resolve({
             expense: mockExpense,
-            inventoryItems: mockItems,
+            inventoryItems: mockInventoryItems,
           });
         } else {
           // 在庫品のみを検出
@@ -184,14 +205,28 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
                 )}
 
                 {!isProcessing && (
-                  <div className="mt-4 rounded-lg bg-white p-4">
+                  <div className="mt-4 max-h-60 overflow-y-auto rounded-lg bg-white p-4">
                     <h3 className="mb-2 font-bold text-gray-800">検出された情報:</h3>
                     {extractedData.expense && (
                       <div className="mb-3 rounded-lg bg-blue-50 p-3">
                         <p className="mb-1 text-sm font-medium text-blue-900">💰 支出</p>
+                        {extractedData.expense.storeName && (
+                          <p className="mb-1 text-sm font-bold text-gray-800">
+                            {extractedData.expense.storeName}
+                          </p>
+                        )}
                         <p className="text-gray-700">
                           ¥{extractedData.expense.amount.toLocaleString()} - {extractedData.expense.category}
                         </p>
+                        {extractedData.expense.items && extractedData.expense.items.length > 0 && (
+                          <div className="mt-2 space-y-1">
+                            {extractedData.expense.items.map((item, idx) => (
+                              <p key={idx} className="text-xs text-gray-600">
+                                • {item.name} - ¥{item.price} ({item.quantity}{item.unit})
+                              </p>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     )}
                     {extractedData.inventoryItems && extractedData.inventoryItems.length > 0 && (

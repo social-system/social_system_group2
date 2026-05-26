@@ -1,5 +1,5 @@
 import { format } from 'date-fns';
-import { Calendar, Tag, Trash2, Image } from 'lucide-react';
+import { Calendar, Trash2, Store, ShoppingBag } from 'lucide-react';
 import type { Expense } from '../App';
 
 interface ExpenseListProps {
@@ -43,8 +43,22 @@ export function ExpenseList({ expenses, onDelete }: ExpenseListProps) {
                   <Calendar className="size-3" />
                   {format(expense.date, 'MM/dd')}
                 </span>
+                {expense.storeName && (
+                  <span className="flex items-center gap-1 rounded bg-orange-100 px-2 py-1 text-xs font-medium text-orange-700">
+                    <Store className="size-3" />
+                    {expense.storeName}
+                  </span>
+                )}
               </div>
               <p className="text-gray-700">{expense.description}</p>
+              {expense.items && expense.items.length > 0 && (
+                <div className="mt-2 flex items-center gap-1 text-xs text-gray-500">
+                  <ShoppingBag className="size-3" />
+                  <span>
+                    {expense.items.length}品目: {expense.items.map((item) => item.name).join(', ')}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-4">

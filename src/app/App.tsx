@@ -17,6 +17,14 @@ import { AddExpenseForm } from "./components/AddExpenseForm";
 import { AddInventoryForm } from "./components/AddInventoryForm";
 import { AddRecipeForm } from "./components/AddRecipeForm";
 import { SettingsModal } from "./components/SettingsModal";
+import { PriceComparison } from "./components/PriceComparison";
+
+export interface PurchaseItem {
+  name: string;
+  price: number;
+  quantity: number;
+  unit: string;
+}
 
 export interface Expense {
   id: string;
@@ -25,6 +33,8 @@ export interface Expense {
   description: string;
   date: Date;
   imageUrl?: string;
+  storeName?: string;
+  items?: PurchaseItem[];
 }
 
 export interface Recipe {
@@ -61,6 +71,17 @@ export default function App() {
       category: '食費',
       description: 'スーパーでの買い物',
       date: new Date(2026, 3, 27),
+      storeName: 'スーパーA',
+      items: [
+        { name: '玉ねぎ', price: 150, quantity: 3, unit: '個'}, 
+        {
+          name: '人参', 
+          price: 98,
+          quantity: 2,
+          unit: '本',
+        },
+        {name: '豚肉', price: 580, quantity: 300, unit: 'g'},
+      ],
     },
     {
       id: '2',
@@ -68,6 +89,36 @@ export default function App() {
       category: '交通費',
       description: '電車代',
       date: new Date(2026, 3, 28),
+    },
+    {
+      id: "3",
+      amount: 2800,
+      category: "食費",
+      description: "食材購入",
+      date: new Date(2026, 4, 15),
+      storeName: "スーパーB",
+      items: [
+        { name: "玉ねぎ", price: 120, quantity: 3, unit: "個" },
+        { name: "トマト", price: 198, quantity: 4, unit: "個" },
+        { name: "牛肉", price: 980, quantity: 200, unit: "g" },
+      ],
+    },
+    {
+      id: "4",
+      amount: 1500,
+      category: "食費",
+      description: "野菜購入",
+      date: new Date(2026, 4, 18),
+      storeName: "八百屋",
+      items: [
+        { name: "玉ねぎ", price: 100, quantity: 5, unit: "個" },
+        {
+          name: "にんじん",
+          price: 80,
+          quantity: 3,
+          unit: "本",
+        },
+      ],
     },
   ]);
 
@@ -217,13 +268,13 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
-      <div className="mx-auto max-w-4xl p-4">
+      <div className="mx-auto max-w-7xl p-4">
         <header className="mb-6">
           <div className="flex items-center justify-between">
             <div className="flex-1"></div>
             <div className="flex-1 text-center">
               <h1 className="mb-2 text-4xl font-bold text-gray-800">
-                💰 家計簿 & レシピ
+                家計簿 & レシピ
               </h1>
               <p className="text-gray-600">カメラで簡単記録</p>
             </div>
@@ -264,7 +315,9 @@ export default function App() {
             </Tabs.Trigger>
           </Tabs.List>
 
-          <Tabs.Content value="expenses" className="space-y-4">
+          <Tabs.Content value="expenses" className="grid gap-4 lg:grid-cols-[1fr,400px]">
+
+            {/* 左側: 支出リスト */}
             <div className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-gray-800">今月の支出</h2>
@@ -285,6 +338,14 @@ export default function App() {
               </div>
 
               <ExpenseList expenses={expenses} onDelete={deleteExpense} />
+            </div>
+
+            {/* 右側: 価格比較 */}
+            <div className="space-y-4">
+              <PriceComparison
+                expenses={expenses}
+                compact={true}
+              />
             </div>
           </Tabs.Content>
 
