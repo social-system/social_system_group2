@@ -30,10 +30,58 @@ Do not proactively warn about a mismatch between total_amount and item line tota
 the service layer performs that deterministic check once after validation.
 Treat normalized_name as an OCR-estimated product name candidate only. It is not a
 database product master name and does not have to match products.name.
+For ocr_metadata, include field-level confidence when you can estimate it.
+Set auto_register_candidate to false and add needs_review_reasons when the item
+has uncertainty that should prevent automatic database registration. If no
+specific reason is known, use an empty needs_review_reasons list.
 Do not include database IDs, product IDs, category IDs, inventory updates, recipe
 recommendations, authentication data, or any fields outside the schema.
 """.strip()
 
+RECEIPT_OCR_FIELD_CONFIDENCE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "raw_name": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "normalized_name": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "category_name": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "purchased_quantity": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "purchased_unit": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "base_quantity": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "base_unit": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "unit_price": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "line_total": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "is_inventory_target": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+    },
+    "required": [
+        "raw_name",
+        "normalized_name",
+        "category_name",
+        "purchased_quantity",
+        "purchased_unit",
+        "base_quantity",
+        "base_unit",
+        "unit_price",
+        "line_total",
+        "is_inventory_target",
+    ],
+}
+
+
+RECEIPT_OCR_ITEM_METADATA_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "additionalProperties": False,
+    "properties": {
+        "field_confidence": RECEIPT_OCR_FIELD_CONFIDENCE_SCHEMA,
+        "auto_register_candidate": {"type": ["boolean", "null"]},
+        "needs_review_reasons": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": [
+        "field_confidence",
+        "auto_register_candidate",
+        "needs_review_reasons",
+    ],
+}
 
 RECEIPT_OCR_ITEM_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -51,6 +99,7 @@ RECEIPT_OCR_ITEM_SCHEMA: dict[str, Any] = {
         "is_inventory_target": {"type": ["boolean", "null"]},
         "confidence": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
         "warnings": {"type": "array", "items": {"type": "string"}},
+        "ocr_metadata": RECEIPT_OCR_ITEM_METADATA_SCHEMA,
     },
     "required": [
         "raw_name",
@@ -65,6 +114,7 @@ RECEIPT_OCR_ITEM_SCHEMA: dict[str, Any] = {
         "is_inventory_target",
         "confidence",
         "warnings",
+        "ocr_metadata",
     ],
 }
 

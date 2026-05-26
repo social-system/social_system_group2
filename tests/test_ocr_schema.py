@@ -81,6 +81,39 @@ def test_receipt_ocr_response_keeps_normalized_name_as_candidate() -> None:
     assert "category_id" not in dumped["items"][0]
 
 
+def test_receipt_ocr_item_accepts_auto_registration_metadata() -> None:
+    item = ReceiptOcrItem(
+        raw_name="タマゴM 10コ",
+        normalized_name="卵",
+        confidence=0.9,
+        ocr_metadata={
+            "field_confidence": {
+                "raw_name": 0.95,
+                "normalized_name": 0.88,
+            },
+            "auto_register_candidate": False,
+            "needs_review_reasons": ["base quantity requires review"],
+        },
+    )
+
+    assert item.ocr_metadata.field_confidence.raw_name == 0.95
+    assert item.ocr_metadata.auto_register_candidate is False
+    assert item.ocr_metadata.needs_review_reasons == [
+        "base quantity requires review"
+    ]
+
+
+def test_invalid_field_confidence_fails() -> None:
+    with pytest.raises(ValidationError):
+        ReceiptOcrItem(
+            ocr_metadata={
+                "field_confidence": {"raw_name": 1.1},
+                "auto_register_candidate": None,
+                "needs_review_reasons": [],
+            }
+        )
+
+
 @pytest.mark.parametrize("forbidden_field", ["product_id", "category_id"])
 def test_database_ids_are_rejected_from_item_schema(forbidden_field: str) -> None:
     data = {

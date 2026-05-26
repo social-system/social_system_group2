@@ -1,7 +1,35 @@
 from datetime import datetime
+from typing import Annotated
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+Confidence = Annotated[float, Field(ge=0, le=1)]
+
+
+class ReceiptOcrItemMetadata(BaseModel):
+    field_confidence: "ReceiptOcrFieldConfidence" = Field(
+        default_factory=lambda: ReceiptOcrFieldConfidence()
+    )
+    auto_register_candidate: bool | None = None
+    needs_review_reasons: list[str] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class ReceiptOcrFieldConfidence(BaseModel):
+    raw_name: Confidence | None = None
+    normalized_name: Confidence | None = None
+    category_name: Confidence | None = None
+    purchased_quantity: Confidence | None = None
+    purchased_unit: Confidence | None = None
+    base_quantity: Confidence | None = None
+    base_unit: Confidence | None = None
+    unit_price: Confidence | None = None
+    line_total: Confidence | None = None
+    is_inventory_target: Confidence | None = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class ReceiptOcrItem(BaseModel):
@@ -17,6 +45,7 @@ class ReceiptOcrItem(BaseModel):
     is_inventory_target: bool | None = None
     confidence: float | None = Field(default=None, ge=0, le=1)
     warnings: list[str] = Field(default_factory=list)
+    ocr_metadata: ReceiptOcrItemMetadata = Field(default_factory=ReceiptOcrItemMetadata)
 
     model_config = ConfigDict(extra="forbid")
 
