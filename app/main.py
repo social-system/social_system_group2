@@ -24,9 +24,20 @@ app = FastAPI(
     title="Receipt API",
 )
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=["http://localhost:5173"],
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+# 村上修正
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",                 # ローカル開発用
+        "https://socialsystemgroup2.vercel.app"  # 本番Vercel用
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
