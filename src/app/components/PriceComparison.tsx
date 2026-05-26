@@ -1,4 +1,5 @@
-import { TrendingDown, Store, Award, AlertCircle } from 'lucide-react';
+import { useState } from 'react';
+import { TrendingDown, Store, Award, AlertCircle, Search, X } from 'lucide-react';
 import type { Expense, PurchaseItem } from '../App';
 
 interface PriceComparisonProps {
@@ -21,6 +22,7 @@ interface ItemPriceData {
 }
 
 export function PriceComparison({ expenses, compact = false }: PriceComparisonProps) {
+  const [searchQuery, setSearchQuery] = useState('');
   // 商品別に価格データを集計
   const analyzePrices = (): ItemPriceData[] => {
     const itemMap = new Map<string, ItemPriceData>();
@@ -43,7 +45,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
 
         const data = itemMap.get(itemNameLower)!;
         data.stores.push({
-          storeName: expense.storeName,
+          storeName: expense.storeName!,
           price: item.price,
           unitPrice: unitPrice,
           quantity: item.quantity,
@@ -54,7 +56,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
         // 最安値を更新
         if (unitPrice < data.bestPrice) {
           data.bestPrice = unitPrice;
-          data.bestStore = expense.storeName;
+          data.bestStore = expense.storeName!;
         }
       });
     });
@@ -90,8 +92,15 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
       .sort((a, b) => b.percentage - a.percentage);
   };
 
-  const priceData = analyzePrices();
+  const allPriceData = analyzePrices();
   const storeRecommendations = getStoreRecommendations();
+ 
+  const priceData = searchQuery.trim()
+    ? allPriceData.filter((item) =>
+        item.itemName.toLowerCase().includes(searchQuery.toLowerCase()),
+      )
+    : allPriceData;
+  
 
   if (priceData.length === 0) {
     return (
@@ -140,57 +149,97 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
         </div>
 
         {/* 商品別価格比較 */}
-        <div className="max-h-[600px] space-y-3 overflow-y-auto rounded-lg bg-white p-4 shadow-md">
+        <div className="rounded-lg bg-white p-4 shadow-md">
           <div className="mb-2 flex items-center gap-2">
             <TrendingDown className="size-5 text-orange-500" />
             <h3 className="font-bold text-gray-800">商品別価格</h3>
           </div>
 
-          {priceData.slice(0, 10).map((item) => (
-            <div
-              key={item.itemName}
-              className="rounded-lg border border-gray-200 p-3 transition-all hover:border-orange-300"
-            >
-              <div className="mb-2 flex items-center justify-between">
-                <p className="font-medium text-gray-800">{item.itemName}</p>
-                <p className="text-xs font-bold text-orange-600">
-                  ¥{item.bestPrice.toFixed(0)}/{item.stores[0].unit}
-                </p>
+         {/* 検索欄 */}
+          <div className="relative mb-2">
+            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="食材名で検索..."
+              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-8 text-sm text-gray-800 outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                aria-label="クリア"
+              >
+                <X className="size-4" />
+              </button>
+            )}
+          </div>
+ 
+          {/* 件数 */}
+          {searchQuery && (
+            <p className="mb-2 text-xs text-gray-500">
+              {priceData.length > 0
+                ? `「${searchQuery}」: ${priceData.length}件`
+                : `「${searchQuery}」に一致する食材はありません`}
+            </p>
+          )}
+ 
+          {/* リスト */}
+          <div className="max-h-[500px] space-y-3 overflow-y-auto">
+            {priceData.length === 0 ? (
+              <div className="py-8 text-center text-gray-400">
+                <Search className="mx-auto mb-2 size-8 opacity-50" />
+                <p className="text-sm">食材が見つかりません</p>
               </div>
+            ) : (
+              priceData.slice(0, 10).map((item) => (
+                <div
+                  key={item.itemName}
+                  className="rounded-lg border border-gray-200 p-3 transition-all hover:border-orange-300"
+                >
+                  <div className="mb-2 flex items-center justify-between">
+                    <p className="font-medium text-gray-800">{item.itemName}</p>
+                    <p className="text-xs font-bold text-orange-600">
+                      ¥{item.bestPrice.toFixed(0)}/{item.stores[0].unit}
+                    </p>
+                  </div>
 
-              <div className="space-y-1">
-                {item.stores
-                  .sort((a, b) => a.unitPrice - b.unitPrice)
-                  .slice(0, 3)
-                  .map((store, idx) => {
-                    const isBest = store.storeName === item.bestStore;
-                    return (
-                      <div
-                        key={`${store.storeName}-${idx}`}
-                        className={`flex items-center justify-between rounded p-2 text-xs ${
-                          isBest ? 'bg-orange-50' : 'bg-gray-50'
-                        }`}
-                      >
-                        <div className="flex items-center gap-1">
-                          <Store className="size-3 text-gray-500" />
-                          <span className="font-medium text-gray-700">
-                            {store.storeName}
-                          </span>
-                          {isBest && (
-                            <span className="ml-1 rounded bg-orange-500 px-1 py-0.5 text-[10px] font-bold text-white">
-                              最安
+                  <div className="space-y-1">
+                    {item.stores
+                      .sort((a, b) => a.unitPrice - b.unitPrice)
+                      .slice(0, 3)
+                      .map((store, idx) => {
+                        const isBest = store.storeName === item.bestStore;
+                        return (
+                          <div
+                            key={`${store.storeName}-${idx}`}
+                            className={`flex items-center justify-between rounded p-2 text-xs ${
+                              isBest ? 'bg-orange-50' : 'bg-gray-50'
+                            }`}
+                          >
+                            <div className="flex items-center gap-1">
+                              <Store className="size-3 text-gray-500" />
+                              <span className="font-medium text-gray-700">
+                                {store.storeName}
+                              </span>
+                              {isBest && (
+                                <span className="ml-1 rounded bg-orange-500 px-1 py-0.5 text-[10px] font-bold text-white">
+                                  最安
+                                </span>
+                              )}
+                            </div>
+                            <span className="font-bold text-gray-800">
+                              ¥{store.unitPrice.toFixed(0)}
                             </span>
-                          )}
-                        </div>
-                        <span className="font-bold text-gray-800">
-                          ¥{store.unitPrice.toFixed(0)}
-                        </span>
-                      </div>
-                    );
-                  })}
-              </div>
-            </div>
-          ))}
+                          </div>
+                        );
+                      })}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       </div>
     );

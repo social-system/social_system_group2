@@ -61,7 +61,7 @@ export function AddInventoryForm({ onAdd, onClose }: AddInventoryFormProps) {
               <label className="mb-1 block text-sm font-medium text-gray-700">数量</label>
               <input
                 type="number"
-                step="0.01"
+                step="1"
                 value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
                 placeholder="3"

@@ -273,10 +273,10 @@ export default function App() {
           <div className="flex items-center justify-between">
             <div className="flex-1"></div>
             <div className="flex-1 text-center">
-              <h1 className="mb-2 text-4xl font-bold text-gray-800">
-                家計簿 & レシピ
+              <h1 className="mb-2 text-3xl font-bold text-gray-800">
+               家計簿 & レシピ提案
               </h1>
-              <p className="text-gray-600">カメラで簡単記録</p>
+              <p className="text-gray-600">レシートで簡単記録</p>
             </div>
             <div className="flex flex-1 justify-end">
               <button
@@ -315,7 +315,7 @@ export default function App() {
             </Tabs.Trigger>
           </Tabs.List>
 
-          <Tabs.Content value="expenses" className="grid gap-4 lg:grid-cols-[1fr,400px]">
+          <Tabs.Content value="expenses" className="grid grid-cols-[1fr,380px] gap-4">
 
             {/* 左側: 支出リスト */}
             <div className="rounded-lg bg-white p-6 shadow-md">
@@ -341,7 +341,7 @@ export default function App() {
             </div>
 
             {/* 右側: 価格比較 */}
-            <div className="space-y-4">
+            <div className="sticky top-4 max-h-[calc(100vh-6rem)] space-y-4 overflow-y-auto">
               <PriceComparison
                 expenses={expenses}
                 compact={true}
@@ -417,10 +417,10 @@ export default function App() {
         {/* フローティングカメラボタン */}
         <button
           onClick={() => setShowCamera(true)}
-          className="fixed bottom-8 right-8 flex size-16 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-green-500 text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
+          className="fixed bottom-8 right-8 flex size-24 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-green-500 text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
           aria-label="カメラを開く"
         >
-          <Camera className="size-8" />
+          <Camera className="size-16" />
         </button>
       </div>
 
@@ -465,6 +465,7 @@ export default function App() {
           settings={settings}
           onSave={(newSettings) => {
             setSettings(newSettings);
+            localStorage.setItem('userSettings', JSON.stringify(newSettings));
             setShowSettings(false);
           }}
           onClose={() => {
