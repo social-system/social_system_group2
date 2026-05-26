@@ -1,15 +1,15 @@
 # レシート・家計簿・在庫データベース API
 
-このリポジトリは、ユーザー確認済みのレシート購入履歴を保存する FastAPI バックエンドです。
+このリポジトリは、ユーザー確認済みのレシート購入履歴、商品マスタ、価格比較、在庫情報を扱う FastAPI バックエンドです。
 
-OCR API ではありません。画像アップロード、OCR 処理、OCR 仮データ保存、認証、ユーザー管理、世帯管理、レシピ提案 API はこのリポジトリでは扱いません。
+OCR API ではありません。画像アップロード、OCR 実行、レシート画像保存、OCR 仮データの永続保存、認証、ユーザー管理、世帯管理、レシピ提案 API はこのリポジトリでは扱いません。
 
 ```text
 OCR 結果 = 仮データ
 DB 登録データ = ユーザー確認済みデータ
 ```
 
-OCR 連携では、OCR API のレスポンスを直接 `POST /receipts` に登録しません。フロントエンドはまず OCR 仮データを `POST /receipts/prepare` に送り、DB 側で日付変換、不要項目除去、`product_id` 解決、カテゴリ補完、数量確認課題の付与を行います。その結果を確認画面でユーザーが修正・確認した後、確定データだけを `POST /receipts` で保存します。
+OCR 連携では、OCR API のレスポンスを直接 `POST /receipts` に登録しません。フロントエンドはまず OCR 仮データを `POST /receipts/prepare` に送り、DB API 側で日付変換、OCR 専用項目の除去、`product_id` 解決、カテゴリ補完、数量確認課題の付与を行います。その結果を確認画面でユーザーが修正・確認した後、確定データだけを `POST /receipts` で保存します。
 
 ```text
 OCR API
@@ -21,22 +21,7 @@ OCR API
   -> GET /prices/cheapest
 ```
 
-OCR API は `product_id` や `category_id` を決めません。OCR の `normalized_name` は商品名候補であり、DB の正式な `products.name` と一致する保証はありません。DB 側では `products.name_key` と `product_aliases.alias_key` を使って表記揺れを吸収し、未解決の商品は確認画面でユーザーが選択して `POST /product-aliases` により学習させます。
-
-## 責務
-
-この API は、家計簿、在庫管理、AI レシピ提案などの外部機能が共通で使える購入履歴と在庫情報を提供します。
-
-| 利用先 | この API が提供するデータ |
-| --- | --- |
-| 家計簿 | 購入日、店舗名、カテゴリ、支払額、明細合計、差額 |
-| 在庫管理 | 商品、数量、単位、保管場所、期限、在庫増減履歴 |
-| 価格比較 | 商品ごとの共通単位あたり価格と最安購入店舗 |
-| AI レシピ提案 | 在庫 API から取得できる商品名、数量、単位、期限 |
-
-料理 AI やレシピ提案自体は、この API の外側で実装します。AI 側は `GET /inventory/balances` や `GET /inventory/batches` のレスポンスを利用します。
-
-## 実装済み機能
+## 提供する機能
 
 | 区分 | 内容 |
 | --- | --- |
@@ -44,12 +29,9 @@ OCR API は `product_id` や `category_id` を決めません。OCR の `normali
 | OCR 登録準備 | OCR 仮データの整形、商品解決、カテゴリ補完、登録前課題の返却 |
 | OCR 自動登録ゲート | 安全条件を満たす OCR 仮データだけを自動保存 |
 | 商品マスタ | 商品検索、商品作成、別名学習 |
-| 明細管理 | 購入時の商品名・数量と、在庫/レシピ用の正規化名・共通単位を保存 |
-| 価格比較 | 指定商品の過去購入履歴から共通単位あたり最安店舗を取得 |
+| 価格比較 | 過去購入履歴から共通単位あたりの最安購入店舗を取得 |
 | 在庫反映 | レシート明細を在庫ロットへ反映 |
-| 在庫残量 | 商品単位の現在在庫を取得 |
-| 在庫ロット | 購入日、期限、保管場所、残量、ステータスを管理 |
-| 在庫増減 | 消費、廃棄、手動調整と履歴取得 |
+| 在庫管理 | 在庫残量、在庫ロット、在庫増減履歴の取得と手動増減 |
 | 運用指標 | 登録準備回数、未解決率、別名衝突数、未解決名上位を取得 |
 
 ## 使用技術
@@ -57,8 +39,9 @@ OCR API は `product_id` や `category_id` を決めません。OCR の `normali
 - Python 3.12+
 - FastAPI
 - SQLAlchemy
+- Alembic
 - SQLite（ローカル開発・テスト）
-- Render PostgreSQL（本番デプロイ方針）
+- Render PostgreSQL（本番デプロイ）
 - Pydantic
 - pytest
 - uv
@@ -87,14 +70,14 @@ inventory_movements
 
 レシート明細では、購入時の表記とアプリ内で扱う共通単位を分けます。
 
-```text
-raw_name              レシート上の商品名
-normalized_name       アプリ内で扱う商品名
-purchased_quantity    購入時の数量
-purchased_unit        購入時の単位
-base_quantity         在庫・レシピ用に変換した数量
-base_unit             在庫・レシピ用の共通単位
-```
+| カラム | 意味 |
+| --- | --- |
+| `raw_name` | レシート上の商品名 |
+| `normalized_name` | アプリ内で扱う商品名 |
+| `purchased_quantity` | 購入時の数量 |
+| `purchased_unit` | 購入時の単位 |
+| `base_quantity` | 在庫・レシピ用に変換した数量 |
+| `base_unit` | 在庫・レシピ用の共通単位 |
 
 例:
 
@@ -109,7 +92,7 @@ base_unit             在庫・レシピ用の共通単位
 }
 ```
 
-`store_name` は NULL を許可します。OCR で店名が取れない場合や、ユーザーが空欄で確定する場合を許容します。
+`total_amount == sum(line_total)` は必須にしません。実レシートでは割引、ポイント、税、レジ袋、OCR 漏れなどにより、明細行合計と最終支払額が一致しないことがあります。差額はサーバー側で `adjustment_amount = total_amount - items_total` として保存します。
 
 ## セットアップ
 
@@ -123,7 +106,9 @@ uv sync
 source .venv/bin/activate
 ```
 
-## 起動
+## ローカル起動
+
+`DATABASE_URL` が未設定の場合は、開発用として `sqlite:///./receipts.db` を使います。
 
 ```bash
 uv run uvicorn app.main:app --reload
@@ -135,8 +120,6 @@ uv run uvicorn app.main:app --reload
 http://localhost:8000
 ```
 
-開発環境では `http://localhost:5173` からの CORS を許可しています。
-
 FastAPI の自動ドキュメント:
 
 ```text
@@ -144,12 +127,25 @@ http://localhost:8000/docs
 http://localhost:8000/redoc
 ```
 
+開発環境では `CORS_ALLOW_ORIGINS` 未設定時に `http://localhost:5173` を許可します。本番では `CORS_ALLOW_ORIGINS` にカンマ区切りでフロントエンド URL を指定します。
+
+## 環境変数
+
+| 変数 | 必須 | 説明 |
+| --- | --- | --- |
+| `DATABASE_URL` | 本番 yes | DB 接続 URL。未設定時は `sqlite:///./receipts.db` |
+| `APP_ENV` | no | 本番では `production` を指定 |
+| `CORS_ALLOW_ORIGINS` | 本番 yes | 許可するフロントエンド URL。カンマ区切り可 |
+| `PORT` | Render が設定 | Uvicorn の待受ポート |
+
+`DATABASE_URL` が `postgres://` または `postgresql://` で始まる場合、アプリ側で `postgresql+psycopg://` に正規化します。SQLite のときだけ `connect_args={"check_same_thread": False}` を使い、PostgreSQL には SQLite 専用設定を渡しません。
+
 ## API 一覧
 
 | メソッド | パス | 概要 |
 | --- | --- | --- |
 | `GET` | `/` | ヘルスチェック |
-| `POST` | `/receipts/prepare` | OCR 仮データを DB 登録前の確認用データへ整形 |
+| `POST` | `/receipts/prepare` | OCR 仮データを登録前確認用データへ整形 |
 | `POST` | `/receipts/auto-create` | OCR 仮データを安全条件つきで自動登録 |
 | `POST` | `/receipts` | ユーザー確認済みレシートを登録 |
 | `GET` | `/receipts` | レシート一覧 |
@@ -165,6 +161,47 @@ http://localhost:8000/redoc
 | `POST` | `/inventory/movements` | 在庫増減登録 |
 | `GET` | `/inventory/movements` | 在庫増減履歴 |
 | `GET` | `/operations/receipt-prepare-metrics` | OCR 登録準備と別名学習の運用指標 |
+
+## 共通ルール
+
+外部 API の日付は主に `YYYYMMDD` の整数で扱い、DB では `Date` として保存します。
+
+```json
+{
+  "purchased_at": 20260512
+}
+```
+
+不正な日付は `422 Unprocessable Entity` です。
+
+```text
+20260230: invalid
+20261301: invalid
+20260512: valid
+```
+
+主なステータス:
+
+| 状況 | ステータス |
+| --- | ---: |
+| 登録成功 | 201 |
+| 取得成功 | 200 |
+| 削除成功 | 200 |
+| 型・形式が不正 | 422 |
+| 形式は正しいが業務ルールに反する | 400 |
+| 対象が存在しない | 404 |
+| 一意制約・別名衝突 | 409 |
+
+業務エラーは主に次の形式です。FastAPI / Pydantic 標準の `422` はそのまま返します。
+
+```json
+{
+  "detail": {
+    "code": "invalid_receipt",
+    "message": "レシートデータが不正です"
+  }
+}
+```
 
 ## API 詳細
 
@@ -268,25 +305,38 @@ OCR レスポンスに近い JSON を受け取り、DB 登録前の確認画面�
 }
 ```
 
-代表的な課題:
+数量・単位関連の主な `issues`:
 
-| 課題コード | 意味 |
+| issue | 意味 |
 | --- | --- |
-| `product_not_resolved` | 商品マスタに解決できない |
 | `unit_conversion_missing` | 商品別変換が必要だが、`product_unit_conversions` に該当行がない |
 | `ambiguous_quantity` | 単位だけでは共通数量を決められない |
-| `base_quantity_missing` | 在庫対象なのに `base_quantity` が空 |
-| `base_unit_missing` | 在庫対象なのに `base_unit` が空 |
-| `inventory_target_without_base_quantity` | 後方互換用。`base_quantity_missing` と併せて返る |
-| `inventory_target_without_base_unit` | 後方互換用。`base_unit_missing` と併せて返る |
+| `base_quantity_missing` | 在庫対象なのに `base_quantity` が最終的に空 |
+| `base_unit_missing` | 在庫対象なのに `base_unit` が最終的に空 |
 
-数量確認が必要な明細がある場合、`validation_issues` には `inventory_items_require_quantity_confirmation` が入ります。確認画面ではユーザーが `base_quantity` / `base_unit` を修正してから `POST /receipts` へ送ります。
+後方互換性のため、当面は `inventory_target_without_base_quantity` / `inventory_target_without_base_unit` も併せて返します。
 
 ### POST /receipts/auto-create
 
-`POST /receipts/prepare` と同じ整形・解決を行ったうえで、自動登録してよい条件を満たす場合だけレシートを保存します。条件を満たさない場合は保存せず、確認画面に回せるレスポンスを返します。
+OCR レスポンスに近い JSON を受け取り、`POST /receipts/prepare` と同じ整形・解決を行ったうえで、自動登録してよい条件を満たす場合だけレシートを保存します。
 
-リクエストは `POST /receipts/prepare` と同じ構造に `auto_register_enabled` を追加します。
+主な自動登録条件:
+
+- `auto_register_enabled = true`
+- `validation_issues` が空
+- `unresolved_items` が空
+- OCR top-level `warnings` が空
+- 各 item の `warnings` が空
+- 各 item の `confidence` が `0.85` 以上
+- 各 `item_resolutions[].issues` が空
+- 各 `item_resolutions[].resolution_status` が `resolved`
+- 購入日、合計金額、明細が揃っている
+- 各明細の `raw_name` / `purchased_quantity` / `line_total` / `is_inventory_target` が揃っている
+- 在庫対象明細は `product_id` / `normalized_name` / `base_quantity` / `base_unit` が揃っている
+- OCR metadata が review reason を要求していない
+- `total_amount` と `line_total` 合計が一致する
+
+リクエスト:
 
 ```json
 {
@@ -306,7 +356,7 @@ OCR レスポンスに近い JSON を受け取り、DB 登録前の確認画面�
       "unit_price": 238,
       "line_total": 238,
       "is_inventory_target": true,
-      "confidence": 0.95,
+      "confidence": 0.98,
       "warnings": []
     }
   ],
@@ -314,25 +364,7 @@ OCR レスポンスに近い JSON を受け取り、DB 登録前の確認画面�
 }
 ```
 
-自動登録する条件:
-
-```text
-auto_register_enabled が true
-validation_issues が空
-unresolved_items が空
-OCR 全体の warnings が空
-各明細の warnings が空
-各明細の confidence が 0.85 以上
-各 `item_resolutions[].issues` が空
-各 `item_resolutions[].resolution_status` が `resolved`
-購入日、合計金額、明細が揃っている
-各明細の raw_name / purchased_quantity / line_total / is_inventory_target が揃っている
-在庫対象明細は product_id / normalized_name / base_quantity / base_unit が揃っている
-OCR メタデータが確認理由を要求していない
-total_amount と line_total 合計が一致する
-```
-
-レスポンス例: 登録された場合
+登録された場合:
 
 ```json
 {
@@ -365,36 +397,11 @@ total_amount と line_total 合計が一致する
 }
 ```
 
-レスポンス例: 登録されなかった場合
-
-```json
-{
-  "created": false,
-  "receipt_id": null,
-  "summary": null,
-  "receipt": {
-    "store_name": "サンプルスーパー",
-    "purchased_at": 20260512,
-    "total_amount": 238,
-    "items": []
-  },
-  "item_resolutions": [],
-  "unresolved_items": [],
-  "warnings": [],
-  "validation_issues": [],
-  "auto_registration": {
-    "eligible": false,
-    "reasons": [
-      "auto_registration_disabled"
-    ],
-    "min_item_confidence": 0.85
-  }
-}
-```
+登録されない場合は `created = false`、`receipt_id = null`、`summary = null` になり、`auto_registration.reasons` に理由が入ります。
 
 ### POST /receipts
 
-フロントエンドでユーザー確認が完了したレシートだけを登録します。
+ユーザー確認済みレシートを保存します。OCR 仮データを直接送る API ではありません。
 
 リクエスト:
 
@@ -416,6 +423,19 @@ total_amount と line_total 合計が一致する
       "unit_price": 238,
       "line_total": 238,
       "is_inventory_target": true
+    },
+    {
+      "raw_name": "センザイ",
+      "normalized_name": "洗剤",
+      "product_id": null,
+      "category_id": 2,
+      "purchased_quantity": 1,
+      "purchased_unit": "個",
+      "base_quantity": null,
+      "base_unit": null,
+      "unit_price": 398,
+      "line_total": 398,
+      "is_inventory_target": false
     }
   ]
 }
@@ -423,22 +443,22 @@ total_amount と line_total 合計が一致する
 
 必須項目:
 
-| 対象 | 必須項目 |
+| 階層 | 必須項目 |
 | --- | --- |
-| receipt | `purchased_at`, `total_amount`, `items` |
-| item | `raw_name`, `purchased_quantity`, `line_total`, `is_inventory_target` |
+| レシート | `purchased_at`, `total_amount`, `items` |
+| 明細 | `raw_name`, `purchased_quantity`, `line_total`, `is_inventory_target` |
 | 在庫対象明細 | `normalized_name` または `product_id`, `base_quantity`, `base_unit` |
 
-`items_total` と `adjustment_amount` はサーバー側で計算します。
+サーバー計算項目:
 
 ```text
-items_total = sum(line_total)
+items_total = sum(item.line_total)
 adjustment_amount = total_amount - items_total
 ```
 
-レシートには割引、ポイント、税、レジ袋、OCR 漏れなどがあるため、`total_amount == items_total` は必須にしません。
+`unit_price * purchased_quantity == line_total` は必須条件にしません。`total_amount == sum(line_total)` も必須条件にしません。
 
-レスポンス: `201`
+成功レスポンス:
 
 ```json
 {
@@ -448,7 +468,7 @@ adjustment_amount = total_amount - items_total
   "total_amount": 636,
   "items_total": 636,
   "adjustment_amount": 0,
-  "item_count": 1
+  "item_count": 2
 }
 ```
 
@@ -456,16 +476,16 @@ adjustment_amount = total_amount - items_total
 
 レシート一覧を返します。
 
-クエリパラメータ:
+クエリ:
 
-| 名前 | 型 | 必須 | 既定値 | 説明 |
-| --- | --- | ---: | --- | --- |
-| `skip` | 整数 | いいえ | `0` | 取得開始位置 |
-| `limit` | 整数 | いいえ | `50` | 取得件数。`1` から `100` |
-| `date_from` | 整数 | いいえ | - | 開始日。`YYYYMMDD` |
-| `date_to` | 整数 | いいえ | - | 終了日。`YYYYMMDD` |
-| `category_id` | 整数 | いいえ | - | カテゴリで絞り込み |
-| `inventory_only` | 真偽値 | いいえ | `false` | 在庫対象明細を含むレシートに絞り込み |
+| 名前 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `skip` | int | `0` | 取得開始位置。`0` 以上 |
+| `limit` | int | `50` | 取得件数。`1` 以上 `100` 以下 |
+| `date_from` | int | null | `YYYYMMDD`。購入日の開始 |
+| `date_to` | int | null | `YYYYMMDD`。購入日の終了 |
+| `category_id` | int | null | 指定カテゴリの明細を含むレシートに絞り込み |
+| `inventory_only` | bool | `false` | 在庫対象明細を含むレシートに絞り込み |
 
 レスポンス:
 
@@ -478,14 +498,14 @@ adjustment_amount = total_amount - items_total
     "total_amount": 636,
     "items_total": 636,
     "adjustment_amount": 0,
-    "item_count": 1
+    "item_count": 2
   }
 ]
 ```
 
 ### GET /receipts/{receipt_id}
 
-レシート詳細を返します。
+レシート詳細を明細付きで返します。
 
 レスポンス:
 
@@ -516,11 +536,11 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-存在しない `receipt_id` は `404` です。
+存在しない `receipt_id` は `404 Not Found` です。
 
 ### DELETE /receipts/{receipt_id}
 
-レシートを削除します。`receipt_items` は連動して削除されます。
+レシートを削除します。明細は cascade で削除されます。
 
 レスポンス:
 
@@ -531,18 +551,18 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-存在しない `receipt_id` は `404` です。
+存在しない `receipt_id` は `404 Not Found` です。
 
 ### GET /products/search
 
-未解決商品に対して、フロントエンドが商品候補を検索します。検索には `products.name_key` と `product_aliases.alias_key` を使います。
+商品マスタと商品別名から候補を検索します。確認画面で未解決商品に対する候補表示に使います。
 
-クエリパラメータ:
+クエリ:
 
 | 名前 | 型 | 必須 | 既定値 | 説明 |
 | --- | --- | ---: | --- | --- |
-| `query` | 文字列 | はい | - | 検索語 |
-| `limit` | 整数 | いいえ | `10` | 取得件数。`1` から `50` |
+| `query` | string | yes | - | 検索語。1文字以上 |
+| `limit` | int | no | `10` | `1` 以上 `50` 以下 |
 
 レスポンス:
 
@@ -562,11 +582,9 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-`query` が空白だけの場合は `400` です。
-
 ### POST /products
 
-確認画面で商品候補が存在しない場合に、商品マスタを新規作成します。`name_key` は API 利用者が入力せず、サーバー側で `name` から生成します。
+商品マスタを作成します。`name_key` は `name` からサーバー側で生成します。`initial_alias_name` が指定された場合は、同じトランザクションで `product_aliases` に登録します。
 
 リクエスト:
 
@@ -583,14 +601,14 @@ adjustment_amount = total_amount - items_total
 
 | 名前 | 型 | 必須 | 説明 |
 | --- | --- | ---: | --- |
-| `name` | 文字列 | はい | 商品マスタ名。空白だけは不可 |
-| `default_base_unit` | 文字列 | はい | 在庫・レシピで使う標準単位。空白だけは不可 |
-| `is_inventory_target` | 真偽値 | はい | 通常在庫対象にするか |
-| `default_category_id` | 整数 | いいえ | 既定カテゴリ。指定された場合は存在確認する |
-| `initial_alias_name` | 文字列 | いいえ | 確認画面で元になった `raw_name` を別名登録する |
-| `alias_source` | 文字列 | いいえ | `initial_alias_name` の登録元。既定値は `user_confirmed` |
+| `name` | string | yes | 商品マスタ名 |
+| `default_base_unit` | string | yes | 在庫・レシピで使う標準単位 |
+| `is_inventory_target` | boolean | yes | 通常在庫対象にするか |
+| `default_category_id` | int | no | 既定カテゴリ。指定時は存在確認する |
+| `initial_alias_name` | string | no | 作成時に同時登録する別名 |
+| `alias_source` | string | no | 既定値 `user_confirmed` |
 
-レスポンス: `201`
+レスポンス:
 
 ```json
 {
@@ -610,11 +628,18 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-`initial_alias_name` がない場合、`created_alias` は `null` です。存在しないカテゴリは `404`、同じ `name_key` の商品は `409`、`initial_alias_name` が別商品の別名と衝突した場合も `409` です。
+主なエラー:
+
+| ステータス | 条件 |
+| ---: | --- |
+| 400 | `name` または `default_base_unit` が空白だけ |
+| 404 | `default_category_id` が存在しない |
+| 409 | 同じ `name_key` の商品が存在する |
+| 409 | `initial_alias_name` が別商品の alias と衝突する |
 
 ### POST /product-aliases
 
-ユーザーが確認した OCR 名やレシート表記と商品マスタの対応を `product_aliases` に保存します。
+ユーザーが確認した OCR 名や入力名と商品マスタの対応を保存します。同じ `alias_key` が同じ `product_id` に登録済みなら冪等に成功し、`created = false` を返します。別 `product_id` に登録済みなら `409 Conflict` です。
 
 リクエスト:
 
@@ -626,14 +651,12 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-`source` の既定値は `user_confirmed` です。許可値:
-
-| 登録元 | 自動解決 | 候補検索 | 説明 |
+| source | 自動解決 | 候補検索 | 説明 |
 | --- | --- | --- | --- |
-| `user_confirmed` | 可 | 可 | ユーザーが確認画面で選択した別名 |
-| `seed` | 可 | 可 | 初期データ・テストデータとして安全に登録した別名 |
-| `admin` | 可 | 可 | 管理者が確認して登録した別名 |
-| `ocr_suggested` | 不可 | 可 | OCR や AI が推定しただけの別名 |
+| `user_confirmed` | 可 | 可 | ユーザーが確認画面で選択した alias |
+| `seed` | 可 | 可 | 初期データ・テストデータとして安全に登録した alias |
+| `admin` | 可 | 可 | 管理者が確認して登録した alias |
+| `ocr_suggested` | 不可 | 可 | OCR や AI が推定しただけの alias |
 
 レスポンス:
 
@@ -649,18 +672,24 @@ adjustment_amount = total_amount - items_total
 }
 ```
 
-同じ `alias_key` が同じ `product_id` に登録済みなら冪等に成功し、`created: false` を返します。別 `product_id` に登録済みなら `409` です。存在しない `product_id` は `404`、空白だけの `alias_name` や許可されていない `source` は `400` です。
+主なエラー:
+
+| ステータス | 条件 |
+| ---: | --- |
+| 400 | `alias_name` が空白だけ、または `source` が許可外 |
+| 404 | `product_id` が存在しない |
+| 409 | 同じ `alias_key` が別商品に紐づいている |
 
 ### GET /prices/cheapest
 
-指定した `product_id` の購入履歴から、最安購入店舗を返します。
+指定した `product_id` の購入履歴から、共通単位あたり価格が最安の購入店舗を返します。
 
-クエリパラメータ:
+クエリ:
 
 | 名前 | 型 | 必須 | 既定値 | 説明 |
 | --- | --- | ---: | --- | --- |
-| `product_id` | 整数 | はい | - | 商品 ID |
-| `period_days` | 整数 | いいえ | `90` | 過去何日を対象にするか |
+| `product_id` | int | yes | - | 商品 ID。`1` 以上 |
+| `period_days` | int | no | `90` | 過去何日分を見るか。`1` 以上 |
 
 比較式:
 
@@ -668,13 +697,7 @@ adjustment_amount = total_amount - items_total
 price_per_base_unit = line_total / base_quantity
 ```
 
-対象外になる明細:
-
-- `product_id` が一致しない
-- `base_quantity` が `null` または `0` 以下
-- `base_unit` が `null`
-- `receipts.store_name` が `null`
-- `purchased_at` が `period_days` の範囲外
+`product_id` が未解決の明細、`base_quantity` が `null` または `0` 以下の明細、`base_unit` が `null` の明細、`store_name` が `null` のレシートは対象外です。
 
 レスポンス:
 
@@ -690,27 +713,25 @@ price_per_base_unit = line_total / base_quantity
     "base_quantity": "10.00",
     "base_unit": "個",
     "purchased_at": 20260512,
-    "receipt_item_id": 31
+    "receipt_item_id": 1
   }
 }
 ```
 
-該当データがない場合:
-
-```json
-{
-  "product_id": 1,
-  "product_name": "卵",
-  "period_days": 90,
-  "cheapest": null
-}
-```
-
-存在しない `product_id` は `404` です。
+商品は存在するが対象履歴がない場合、`cheapest` は `null` です。商品が存在しない場合は `404 Not Found` です。
 
 ### POST /inventory/receipts/{receipt_id}/apply
 
-`is_inventory_target = true` で、`product_id`、`base_quantity`、`base_unit` がそろっているレシート明細を在庫ロットへ反映します。同じレシート明細は二重に在庫化しません。
+レシート明細から在庫対象の商品を在庫へ反映します。対象明細ごとに `inventory_batches` を作成し、購入による `inventory_movements` を記録します。
+
+処理対象になる明細:
+
+```text
+is_inventory_target = true
+product_id is not null
+base_quantity is not null and base_quantity > 0
+base_unit is not null
+```
 
 リクエスト:
 
@@ -718,11 +739,18 @@ price_per_base_unit = line_total / base_quantity
 {
   "default_location_id": 1,
   "expires_at_by_receipt_item_id": {
-    "31": "2026-05-20"
+    "31": "2026-05-20",
+    "32": "2026-05-18"
   },
   "idempotency_key": "receipt:12:apply-inventory"
 }
 ```
+
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | ---: | --- |
+| `default_location_id` | int | no | 作成する在庫ロットの標準保管場所 |
+| `expires_at_by_receipt_item_id` | object | no | 明細 ID ごとの期限日 |
+| `idempotency_key` | string | no | 同じ API リクエストの二重送信防止キー |
 
 レスポンス:
 
@@ -730,8 +758,8 @@ price_per_base_unit = line_total / base_quantity
 {
   "receipt_id": 12,
   "operation_id": 100,
-  "applied_count": 1,
-  "skipped_count": 0,
+  "applied_count": 2,
+  "skipped_count": 1,
   "items": [
     {
       "receipt_item_id": 31,
@@ -742,32 +770,47 @@ price_per_base_unit = line_total / base_quantity
       "batch_id": 201,
       "status": "applied",
       "reason": null
+    },
+    {
+      "receipt_item_id": 33,
+      "product_id": null,
+      "product_name": "洗剤",
+      "quantity": null,
+      "unit": null,
+      "batch_id": null,
+      "status": "skipped",
+      "reason": "not_inventory_target"
     }
   ]
 }
 ```
 
-主なスキップ理由:
+主な `skipped` 理由:
 
-| 理由コード | 意味 |
+| reason | 意味 |
 | --- | --- |
 | `not_inventory_target` | 在庫対象ではない |
-| `missing_product_or_base_quantity` | `product_id`、`base_quantity`、`base_unit` のいずれかが不足、または `base_quantity <= 0` |
-| `already_applied` | 既に在庫ロットへ反映済み |
+| `missing_product_or_base_quantity` | 在庫反映に必要な商品・数量・単位が不足 |
+| `already_applied` | 既に同じレシート明細が在庫反映済み |
 
-存在しない `receipt_id` は `404`、存在しない `default_location_id` は `400` です。
+主なエラー:
+
+| ステータス | 条件 |
+| ---: | --- |
+| 400 | `default_location_id` が存在しない |
+| 404 | `receipt_id` が存在しない |
 
 ### GET /inventory/balances
 
-商品・単位ごとの現在在庫を返します。
+現在在庫を商品単位、単位単位で集計して返します。
 
-クエリパラメータ:
+クエリ:
 
-| 名前 | 型 | 必須 | 既定値 | 説明 |
-| --- | --- | ---: | --- | --- |
-| `product_id` | 整数 | いいえ | - | 商品で絞り込み |
-| `location_id` | 整数 | いいえ | - | 保管場所で絞り込み |
-| `include_zero` | 真偽値 | いいえ | `false` | 残量 0 の在庫も含める |
+| 名前 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | null | 商品で絞り込み |
+| `location_id` | int | null | 保管場所で絞り込み |
+| `include_zero` | bool | `false` | 残量 0 や inactive を含めるか |
 
 レスポンス:
 
@@ -779,7 +822,7 @@ price_per_base_unit = line_total / base_quantity
       "product_name": "卵",
       "quantity": "16.00",
       "unit": "個",
-      "nearest_expires_at": "2026-05-20",
+      "nearest_expires_at": "2026-05-15",
       "batch_count": 2
     }
   ]
@@ -790,15 +833,15 @@ price_per_base_unit = line_total / base_quantity
 
 在庫ロット一覧を返します。
 
-クエリパラメータ:
+クエリ:
 
-| 名前 | 型 | 必須 | 既定値 | 説明 |
-| --- | --- | ---: | --- | --- |
-| `product_id` | 整数 | いいえ | - | 商品で絞り込み |
-| `location_id` | 整数 | いいえ | - | 保管場所で絞り込み |
-| `status` | 文字列 | いいえ | - | `active` / `depleted` / `discarded` |
-| `expires_before` | 日付 | いいえ | - | 指定日以前に期限が来るもの |
-| `include_zero` | 真偽値 | いいえ | `false` | 残量 0 の在庫も含める |
+| 名前 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | null | 商品で絞り込み |
+| `location_id` | int | null | 保管場所で絞り込み |
+| `status` | string | null | `active` / `depleted` / `discarded` |
+| `expires_before` | date | null | 指定日以前に期限が来るもの |
+| `include_zero` | bool | `false` | 残量 0 や inactive を含めるか |
 
 レスポンス:
 
@@ -823,13 +866,11 @@ price_per_base_unit = line_total / base_quantity
 }
 ```
 
-無効な `status` は `400` です。
+不正な `status` は `400 Bad Request` です。
 
 ### POST /inventory/movements
 
-在庫の消費、廃棄、手動調整を登録します。
-
-`movement_type` は `consume`、`dispose`、`adjust` を受け取ります。`batch_id` を指定しない消費・廃棄では、期限が近いロットから順に差し引きます。`adjust` で正の数量を指定した場合は手動追加ロットを作成します。
+手動で在庫を増減します。`consume` と `dispose` は在庫を減らします。`adjust` は `quantity > 0` なら新しいロットを追加し、`quantity < 0` なら既存ロットから減らします。
 
 リクエスト:
 
@@ -840,12 +881,26 @@ price_per_base_unit = line_total / base_quantity
   "quantity": "2.00",
   "unit": "個",
   "batch_id": null,
-  "location_id": null,
-  "reason": "夕食で使用",
-  "occurred_at": "2026-05-13T18:30:00",
-  "idempotency_key": "manual:consume:egg:20260513-001"
+  "location_id": 1,
+  "reason": "卵焼きに使用",
+  "occurred_at": "2026-05-13T08:00:00",
+  "idempotency_key": "manual:consume:20260513:egg:001"
 }
 ```
+
+| 名前 | 型 | 必須 | 説明 |
+| --- | --- | ---: | --- |
+| `product_id` | int | yes | 商品 ID |
+| `movement_type` | string | yes | `consume` / `dispose` / `adjust` |
+| `quantity` | decimal | yes | `0` は不可。`consume` / `dispose` は正数のみ |
+| `unit` | string | yes | 商品の `default_base_unit` と一致する必要がある |
+| `batch_id` | int | no | 特定ロットだけを増減する場合 |
+| `location_id` | int | no | 保管場所。手動追加時などに使用 |
+| `reason` | string | no | 理由。255文字以内 |
+| `occurred_at` | datetime | no | 発生日時。未指定ならサーバー時刻 |
+| `idempotency_key` | string | no | 二重実行防止キー |
+
+`batch_id` が未指定の減少系操作では、期限が近いロット、購入日が古いロット、ID が古いロットの順に自動で減らします。
 
 レスポンス:
 
@@ -859,7 +914,7 @@ price_per_base_unit = line_total / base_quantity
   "unit": "個",
   "movements": [
     {
-      "movement_id": 301,
+      "movement_id": 401,
       "batch_id": 201,
       "quantity_delta": "-2.00",
       "remaining_quantity": "8.00"
@@ -868,24 +923,32 @@ price_per_base_unit = line_total / base_quantity
 }
 ```
 
-存在しない `product_id` / `batch_id` は `404` です。単位不一致、存在しない `location_id`、在庫不足、対象外ロット指定は `400` です。
+主なエラー:
+
+| ステータス | 条件 |
+| ---: | --- |
+| 400 | 単位が商品の `default_base_unit` と一致しない |
+| 400 | 指定ロットが対象商品・単位・状態に合わない |
+| 400 | 在庫不足 |
+| 404 | `product_id` または `batch_id` が存在しない |
+| 422 | `quantity = 0`、または `consume` / `dispose` で `quantity <= 0` |
 
 ### GET /inventory/movements
 
 在庫増減履歴を返します。
 
-クエリパラメータ:
+クエリ:
 
-| 名前 | 型 | 必須 | 既定値 | 説明 |
-| --- | --- | ---: | --- | --- |
-| `product_id` | 整数 | いいえ | - | 商品で絞り込み |
-| `batch_id` | 整数 | いいえ | - | 在庫ロットで絞り込み |
-| `operation_id` | 整数 | いいえ | - | 操作単位で絞り込み |
-| `movement_type` | 文字列 | いいえ | - | 増減種別で絞り込み |
-| `from_date` | 日付 | いいえ | - | 発生日の開始日 |
-| `to_date` | 日付 | いいえ | - | 発生日の終了日 |
-| `limit` | 整数 | いいえ | `100` | 取得件数。`1` から `500` |
-| `offset` | 整数 | いいえ | `0` | 取得開始位置 |
+| 名前 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `product_id` | int | null | 商品で絞り込み |
+| `batch_id` | int | null | ロットで絞り込み |
+| `operation_id` | int | null | 操作で絞り込み |
+| `movement_type` | string | null | `purchase` / `consume` / `dispose` / `adjust` など |
+| `from_date` | date | null | 発生日の開始 |
+| `to_date` | date | null | 発生日の終了 |
+| `limit` | int | `100` | `1` 以上 `500` 以下 |
+| `offset` | int | `0` | `0` 以上 |
 
 レスポンス:
 
@@ -894,15 +957,15 @@ price_per_base_unit = line_total / base_quantity
   "items": [
     {
       "movement_id": 301,
-      "operation_id": 101,
+      "operation_id": 100,
       "batch_id": 201,
       "product_id": 1,
       "product_name": "卵",
-      "movement_type": "consume",
-      "quantity_delta": "-2.00",
+      "movement_type": "purchase",
+      "quantity_delta": "10.00",
       "unit": "個",
-      "reason": "夕食で使用",
-      "occurred_at": "2026-05-13T18:30:00"
+      "reason": "receipt apply",
+      "occurred_at": "2026-05-12T10:00:00"
     }
   ]
 }
@@ -910,13 +973,13 @@ price_per_base_unit = line_total / base_quantity
 
 ### GET /operations/receipt-prepare-metrics
 
-`POST /receipts/prepare` と別名学習の最小限の運用指標を返します。この API のために保存するのは集約情報だけです。OCR 生 JSON、価格、店舗名、購入日、全明細は保存しません。
+`POST /receipts/prepare` と alias 学習の最小限の運用指標を返します。OCR 生 JSON、価格、店舗名、購入日、全明細は保存しません。
 
-クエリパラメータ:
+クエリ:
 
-| 名前 | 型 | 必須 | 既定値 | 説明 |
-| --- | --- | ---: | --- | --- |
-| `top_limit` | 整数 | いいえ | `10` | 未解決名上位の件数。`1` から `50` |
+| 名前 | 型 | 既定値 | 説明 |
+| --- | --- | --- | --- |
+| `top_limit` | int | `10` | 未解決名上位の件数。`1` 以上 `50` 以下 |
 
 レスポンス:
 
@@ -940,8 +1003,6 @@ price_per_base_unit = line_total / base_quantity
 }
 ```
 
-`unresolved_rate` は `unresolved_item_count / total_item_count` で計算します。`total_item_count = 0` の場合は `0` を返します。
-
 ## 確認画面での商品紐づけフロー
 
 フロントエンドは OCR 結果を直接 `POST /receipts` へ送らず、次の順でユーザー確認済みデータを作ります。
@@ -949,61 +1010,136 @@ price_per_base_unit = line_total / base_quantity
 ```text
 1. OCR 結果を POST /receipts/prepare に送る
 2. 未解決商品の product_candidates を確認画面に表示する
-3. 候補が足りない場合は GET /products/search?query=... で商品名または別名から検索する
+3. 候補が足りない場合は GET /products/search?query=... で商品名または alias から検索する
 4. 候補が存在しない場合は POST /products で商品を作成し、必要なら raw_name を initial_alias_name として登録する
 5. 既存商品を選んだ場合は OCR 由来の raw_name を POST /product-aliases で product_aliases に登録する
 6. 確認済みの receipt を POST /receipts で保存する
 ```
 
-`raw_name` はレシート上の表記であり、最優先の別名学習対象です。
+`raw_name` はレシート上の表記であり、最優先の alias 学習対象です。`normalized_name` は OCR や AI が推定した候補であり、DB 正式名とは限りません。そのため `POST /receipts/prepare` は `normalized_name` を自動で alias 登録しません。
 
-`normalized_name` は OCR や AI が推定した候補であり、DB 正式名とは限りません。そのため `POST /receipts/prepare` は `normalized_name` を自動で別名登録しません。`normalized_name` を別名として登録したい場合は、ユーザーが明示的に確認した値を `POST /product-aliases` の `alias_name` として送ります。
+## Render デプロイ
 
-## バリデーション
+本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
 
-| 条件 | ステータス |
-| --- | ---: |
-| 型や形式が不正 | 422 |
-| `items` が空 | 422 |
-| `purchased_at` が実在しない日付 | 422 |
-| `total_amount` が 0 未満 | 422 |
-| `raw_name` が空 | 422 |
-| `purchased_quantity` が 0 以下 | 422 |
-| `line_total` が 0 未満 | 422 |
-| `is_inventory_target = true` なのに `normalized_name` と `product_id` がどちらも空 | 422 |
-| `is_inventory_target = true` なのに `base_quantity` または `base_unit` が空 | 422 |
-| 形式は正しいが業務ルールに反する | 400 |
-| 存在しない `receipt_id` | 404 |
-| 存在しない `product_id` または `category_id` | 400 または 404。API ごとの説明を参照 |
-
-`unit_price * purchased_quantity == line_total` は必須にしません。
-
-`total_amount == sum(line_total)` も必須にしません。ただし `POST /receipts/auto-create` の自動登録ゲートでは一致を要求します。
-
-## エラー形式
-
-FastAPI / Pydantic 標準の `422` はそのまま返します。業務エラーでは、API によって文字列または次の形式の `detail` を返します。
-
-```json
-{
-  "detail": {
-    "code": "invalid_receipt",
-    "message": "レシートデータが不正です"
-  }
-}
+```text
+API: Render Web Service
+DB: Render PostgreSQL
+DB接続: Render PostgreSQL の Internal Database URL
+Schema管理: Alembic
+ローカル開発DB: SQLite継続可
 ```
 
-代表的なステータス:
+### Render に設定する値
 
-| 状況 | ステータス |
-| --- | ---: |
-| 登録成功 | 201 |
-| 取得成功 | 200 |
-| 削除成功 | 200 |
-| 型・形式が不正 | 422 |
-| 形式は正しいが業務ルールに反する | 400 |
-| 対象が存在しない | 404 |
-| 一意制約・別名衝突 | 409 |
+| 項目 | 値 |
+| --- | --- |
+| Build Command | `pip install -e .` |
+| Start Command | `bash scripts/start_render.sh` |
+| Runtime | Python |
+| Python version | `3.12` 系 |
+
+環境変数:
+
+| 変数 | 値 |
+| --- | --- |
+| `DATABASE_URL` | Render PostgreSQL の Internal Database URL |
+| `APP_ENV` | `production` |
+| `CORS_ALLOW_ORIGINS` | フロントエンドの本番 URL。カンマ区切り可 |
+| `PORT` | Render が自動設定するため通常は手動設定不要 |
+
+実際の `DATABASE_URL`、DB ユーザー名、DB パスワード、API キー、トークンはリポジトリにコミットしません。
+
+### 起動時に行うこと
+
+Render の Start Command は `scripts/start_render.sh` を実行します。
+
+```bash
+alembic upgrade head
+python -m scripts.seed_master_data
+uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+```
+
+本番では FastAPI アプリの import 時や起動時に `Base.metadata.create_all()` でテーブルを自動作成しません。スキーマ変更は Alembic migration で管理します。
+
+### 手動デプロイ手順
+
+1. Render で PostgreSQL を作成する。
+2. Render で Web Service を作成する。
+3. GitHub リポジトリを接続する。
+4. Build Command に `pip install -e .` を設定する。
+5. Start Command に `bash scripts/start_render.sh` を設定する。
+6. `DATABASE_URL` に Render PostgreSQL の Internal Database URL を設定する。
+7. `APP_ENV=production` を設定する。
+8. `CORS_ALLOW_ORIGINS` に本番フロントエンド URL を設定する。
+9. Deploy する。
+10. `/` と `/docs` を確認する。
+
+疎通確認:
+
+```bash
+curl https://YOUR_RENDER_SERVICE.onrender.com/
+```
+
+期待値:
+
+```json
+{"status":"ok"}
+```
+
+### render.yaml
+
+このリポジトリには Render Blueprint の例として `render.yaml` を置いています。
+
+```yaml
+databases:
+  - name: receipt-db
+    databaseName: receipt_db
+    user: receipt_user
+
+services:
+  - type: web
+    name: receipt-api
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: bash scripts/start_render.sh
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: receipt-db
+          property: connectionString
+      - key: CORS_ALLOW_ORIGINS
+        value: https://your-frontend.example.com
+      - key: PYTHON_VERSION
+        value: "3.12"
+```
+
+`CORS_ALLOW_ORIGINS` は実際のフロントエンド URL に差し替えます。
+
+### よくある失敗
+
+- `DATABASE_URL` が未設定で SQLite に接続してしまう
+- Render PostgreSQL の External URL を誤って使い、同一リージョン内通信の想定から外れる
+- `CORS_ALLOW_ORIGINS` にフロントエンド URL が入っていない
+- `alembic upgrade head` が失敗してテーブルがない
+- Start Command が `uvicorn app.main:app` だけになっていて migration と seed が実行されない
+- 実際の DB 接続 URL やパスワードを README や `render.yaml` に直接書いてしまう
+
+## Alembic
+
+現在のモデルから初期 migration を作成済みです。Alembic はアプリ本体と同じ `DATABASE_URL` を使います。
+
+一時 SQLite DB に migration を流す確認:
+
+```bash
+rm -f tmp_alembic_check.db
+DATABASE_URL=sqlite:///./tmp_alembic_check.db uv run alembic upgrade head
+rm -f tmp_alembic_check.db
+```
+
+本番 DB の schema 変更は必ず migration を追加してから `alembic upgrade head` で反映します。
 
 ## テスト
 
@@ -1025,123 +1161,21 @@ uv run pytest
 uv run ruff check .
 ```
 
-テストでは通常開発用の `receipts.db` を使わず、一時 SQLite DB に差し替えます。
-
-## Render デプロイ
-
-本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
-
-```text
-API: Render Web Service
-DB: Render PostgreSQL
-DB接続: Render PostgreSQL の Internal Database URL
-Schema管理: Alembic
-```
-
-ローカル開発では、`DATABASE_URL` を未設定にすると SQLite (`sqlite:///./receipts.db`) を使います。本番では Render PostgreSQL の Internal Database URL を `DATABASE_URL` に設定します。
-
-### 必要な環境変数
-
-| 変数 | 内容 |
-| --- | --- |
-| `DATABASE_URL` | Render PostgreSQL の接続URL |
-| `APP_ENV` | `production` |
-| `CORS_ALLOW_ORIGINS` | フロントエンドURL。カンマ区切り可 |
-| `PORT` | Render が自動設定するため通常は手動設定不要 |
-
-`DATABASE_URL` には Render PostgreSQL の Internal Database URL を使います。実際の接続URL、DBユーザー名、DBパスワードは README や設定ファイルに直接書かないでください。
-
-### Render PostgreSQL 作成手順
-
-1. Render ダッシュボードで PostgreSQL を作成します。
-2. database name と user は任意ですが、`render.yaml` の例では `receipt_db` / `receipt_user` を使っています。
-3. Web Service から参照できるよう、Internal Database URL を使います。
-4. 実際の URL やパスワードはリポジトリに保存しません。
-
-### Render Web Service 作成手順
-
-手動デプロイの流れ:
-
-```text
-1. RenderでPostgreSQLを作成する
-2. RenderでWeb Serviceを作成する
-3. GitHubリポジトリを接続する
-4. Build Commandを設定する
-5. Start Commandを設定する
-6. 環境変数を設定する
-7. Deployする
-8. / と /docs を確認する
-```
-
-Render 側の設定例:
-
-```text
-Build Command: pip install -e .
-Start Command: bash scripts/start_render.sh
-```
-
-`render.yaml` を使う場合は、`DATABASE_URL` を `fromDatabase` で Render PostgreSQL から渡す設定例にしています。`CORS_ALLOW_ORIGINS` は `https://your-frontend.example.com` のようなプレースホルダーなので、実際のフロントエンドURLに差し替えてください。
-
-### migration の流れ
-
-Render の Start Command は `scripts/start_render.sh` を実行します。起動スクリプトでは、次の順に実行します。
-
-```text
-alembic upgrade head
-python -m scripts.seed_master_data
-uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}
-```
-
-本番では `Base.metadata.create_all()` による自動テーブル作成を行いません。スキーマ変更は Alembic migration で管理します。起動時は先に `alembic upgrade head` を実行し、その後に必要最小限のマスタデータを `python -m scripts.seed_master_data` で投入します。
-
-### CORS 設定
-
-本番では `CORS_ALLOW_ORIGINS` に許可するフロントエンドURLだけを設定します。複数ある場合はカンマ区切りで指定できます。
-
-例:
-
-```text
-CORS_ALLOW_ORIGINS=https://your-frontend.example.com,https://another-frontend.example.com
-```
-
-`*` は許可しません。資格情報付きCORSとワイルドカードを組み合わせないでください。
-
-### 疎通確認
-
-デプロイ後に `/` と `/docs` を確認します。ヘルスチェックは次で確認できます。
-
-```bash
-curl https://YOUR_RENDER_SERVICE.onrender.com/
-```
-
-期待値:
-
-```json
-{"status":"ok"}
-```
-
-### よくある失敗
-
-- `DATABASE_URL` 未設定でSQLiteに接続してしまう
-- `CORS_ALLOW_ORIGINS` にフロントエンドURLが入っていない
-- `alembic upgrade head` が失敗してテーブルがない
-- Start Command が間違っていて起動しない
-- 秘密情報をREADMEに直接書いてしまう
+テストでは通常開発用の `receipts.db` を使わず、テスト用 SQLite DB に差し替えます。
 
 ## 開発時の注意
 
 - 既存の `receipts.db` に実データが入っている可能性があるため、勝手に削除しないでください。
-- Render + Render PostgreSQL 対応は `docs/deploys/` の手順に沿って進めます。
-- 本番 DB のスキーマ変更は Alembic migration で管理します。
-- GitHub へのプッシュは行いません。
-- ローカルコミットは利用者から明示された場合のみ行います。
+- OCR API、画像アップロード、画像保存、レシピ提案 API、認証、ユーザー管理、世帯管理はこのリポジトリでは実装しません。
+- GitHub への push は行いません。
+- ローカル commit は利用者から明示された場合のみ行います。
+- `.env`、実際の `DATABASE_URL`、DB パスワード、API キー、秘密鍵、個人トークンをコミットしないでください。
 
 ## 関連ドキュメント
 
 - `AGENTS.md`
 - `docs/DATABASE_DESIGN.md`
+- `docs/INVENTORY_IMPLEMENTATION_SPEC.md`
 - `docs/API_SPEC.md`
 - `docs/OCR_DB_INTERFACE.md`
-- `docs/CODEX_IMPLEMENTATION_PLAN.md`
-- `docs/INVENTORY_IMPLEMENTATION_SPEC.md`
 - `docs/deploys/README.md`
