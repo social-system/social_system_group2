@@ -1,9 +1,10 @@
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
 from app.common.date import format_yyyymmdd, parse_yyyymmdd
+from app.inventory.models import InventoryBatch, InventoryMovement, InventoryOperation
 from app.receipts.models import Receipt, ReceiptItem
 
 
@@ -73,6 +74,44 @@ def delete_receipt(db: Session, receipt_id: int) -> int | None:
         return None
 
     deleted_id = receipt.id
+    _delete_inventory_links_for_receipt(db, receipt)
     db.delete(receipt)
     db.flush()
     return deleted_id
+
+
+def _delete_inventory_links_for_receipt(db: Session, receipt: Receipt) -> None:
+    receipt_item_ids = [item.id for item in receipt.items]
+    if not receipt_item_ids:
+        return
+
+    batches = db.scalars(
+        select(InventoryBatch).where(InventoryBatch.receipt_item_id.in_(receipt_item_ids))
+    ).all()
+    batch_ids = [batch.id for batch in batches]
+
+    operations = db.scalars(
+        select(InventoryOperation).where(InventoryOperation.receipt_id == receipt.id)
+    ).all()
+    operation_ids = [operation.id for operation in operations]
+
+    movement_conditions = [InventoryMovement.receipt_item_id.in_(receipt_item_ids)]
+    if batch_ids:
+        movement_conditions.append(InventoryMovement.batch_id.in_(batch_ids))
+    if operation_ids:
+        movement_conditions.append(InventoryMovement.operation_id.in_(operation_ids))
+
+    movements = db.scalars(
+        select(InventoryMovement).where(or_(*movement_conditions))
+    ).all()
+    for movement in movements:
+        db.delete(movement)
+    db.flush()
+
+    for batch in batches:
+        db.delete(batch)
+    db.flush()
+
+    for operation in operations:
+        db.delete(operation)
+    db.flush()

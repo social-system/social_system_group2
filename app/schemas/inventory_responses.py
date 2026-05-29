@@ -40,8 +40,11 @@ class InventoryBalanceItemResponse(BaseModel):
     unit: str
     nearest_expires_at: date | None
     batch_count: int
+    normalized_name: str
+    current_quantity: Decimal
+    base_unit: str
 
-    @field_serializer("quantity")
+    @field_serializer("quantity", "current_quantity")
     def serialize_quantity(self, value: Decimal) -> str:
         return _format_decimal(value) or "0.00"
 

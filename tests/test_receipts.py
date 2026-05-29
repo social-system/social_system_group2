@@ -1,3 +1,4 @@
+from app.inventory.models import InventoryBatch, InventoryMovement, InventoryOperation
 from app.receipts.models import AccountingCategory, Product
 
 
@@ -302,6 +303,35 @@ def test_create_receipt_accepts_existing_product_and_category(client, db_session
     assert item["category_id"] == category.id
 
 
+def test_create_receipt_auto_applies_inventory_for_resolved_items(client, db_session):
+    category = AccountingCategory(name="food", sort_order=1)
+    db_session.add(category)
+    db_session.flush()
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        default_category_id=category.id,
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(product_id=product.id, category_id=category.id),
+    )
+
+    assert response.status_code == 201
+    batch = db_session.query(InventoryBatch).one()
+    movement = db_session.query(InventoryMovement).one()
+    operation = db_session.query(InventoryOperation).one()
+    assert batch.product_id == product.id
+    assert batch.current_quantity == 1000
+    assert movement.movement_type == "purchase"
+    assert operation.idempotency_key == f"receipt:create:{response.json()['id']}"
+
+
 def test_create_receipt_accepts_prepare_receipt(client, db_session):
     category = AccountingCategory(name="food", sort_order=1)
     db_session.add(category)
@@ -427,6 +457,30 @@ def test_delete_receipt(client):
 
     get_response = client.get(f"/receipts/{created['id']}")
     assert get_response.status_code == 404
+
+
+def test_delete_receipt_removes_auto_applied_inventory(client, db_session):
+    category = AccountingCategory(name="food", sort_order=1)
+    db_session.add(category)
+    db_session.flush()
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        default_category_id=category.id,
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+    created = create_receipt(client, product_id=product.id, category_id=category.id)
+    assert db_session.query(InventoryBatch).count() == 1
+
+    response = client.delete(f"/receipts/{created['id']}")
+
+    assert response.status_code == 200
+    assert db_session.query(InventoryBatch).count() == 0
+    assert db_session.query(InventoryMovement).count() == 0
+    assert db_session.query(InventoryOperation).count() == 0
 
 
 def test_delete_receipt_returns_404_for_missing_id(client):

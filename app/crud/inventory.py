@@ -253,6 +253,17 @@ def apply_receipt_to_inventory(
     )
 
 
+def receipt_has_applicable_inventory_items(receipt: Receipt) -> bool:
+    return any(
+        item.is_inventory_target
+        and item.product_id is not None
+        and item.base_quantity is not None
+        and item.base_quantity > 0
+        and item.base_unit is not None
+        for item in receipt.items
+    )
+
+
 def get_inventory_balances(
     db: Session,
     *,
@@ -284,9 +295,13 @@ def get_inventory_balances(
                 "unit": batch.unit,
                 "nearest_expires_at": None,
                 "batch_count": 0,
+                "normalized_name": batch.product.name,
+                "current_quantity": Decimal("0"),
+                "base_unit": batch.unit,
             },
         )
         current["quantity"] = current["quantity"] + batch.current_quantity  # type: ignore[operator]
+        current["current_quantity"] = current["current_quantity"] + batch.current_quantity  # type: ignore[operator]
         current["batch_count"] = current["batch_count"] + 1  # type: ignore[operator]
         if batch.expires_at is not None:
             nearest = current["nearest_expires_at"]

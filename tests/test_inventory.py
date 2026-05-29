@@ -206,6 +206,9 @@ def test_inventory_balances_group_by_product_and_unit(client, db_session):
             "unit": product.default_base_unit,
             "nearest_expires_at": None,
             "batch_count": 2,
+            "normalized_name": product.name,
+            "current_quantity": "16.00",
+            "base_unit": product.default_base_unit,
         }
     ]
 

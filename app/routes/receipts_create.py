@@ -2,8 +2,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.common.date import format_yyyymmdd
+from app.crud.inventory import (
+    apply_receipt_to_inventory,
+    receipt_has_applicable_inventory_items,
+)
 from app.crud.receipts_create import create_receipt
 from app.db.session import get_db
+from app.schemas.inventory_requests import InventoryReceiptApplyRequest
 from app.schemas.receipts_prepare import (
     ReceiptAutoCreateRequest,
     ReceiptAutoCreateResponse,
@@ -60,6 +65,14 @@ def post_receipt_auto_create(
             )
             receipt = create_receipt(db, receipt_payload)
             receipt.source = "ocr_auto_registered"
+            if receipt_has_applicable_inventory_items(receipt):
+                apply_receipt_to_inventory(
+                    db,
+                    receipt.id,
+                    InventoryReceiptApplyRequest(
+                        idempotency_key=f"receipt:auto-create:{receipt.id}"
+                    ),
+                )
             db.commit()
             db.refresh(receipt)
             receipt_id = receipt.id
@@ -109,6 +122,12 @@ def post_receipt(
 ):
     try:
         receipt = create_receipt(db, payload)
+        if receipt_has_applicable_inventory_items(receipt):
+            apply_receipt_to_inventory(
+                db,
+                receipt.id,
+                InventoryReceiptApplyRequest(idempotency_key=f"receipt:create:{receipt.id}"),
+            )
         db.commit()
         db.refresh(receipt)
     except ValueError as e:
