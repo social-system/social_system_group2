@@ -1,5 +1,131 @@
 # レシート・家計簿・在庫データベース API
 
+## Render デプロイ
+
+本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
+
+```text
+API: Render Web Service
+DB: Render PostgreSQL
+DB接続: Render PostgreSQL の Internal Database URL
+Schema管理: Alembic
+ローカル開発DB: SQLite継続可
+```
+
+### Render に設定する値
+
+| 項目 | 値 |
+| --- | --- |
+| Build Command | `pip install -e .` |
+| Start Command | `bash scripts/start_render.sh` |
+| Runtime | Python |
+| Python version | `3.12` 系 |
+
+環境変数:
+
+| 変数 | 値 |
+| --- | --- |
+| `DATABASE_URL` | Render PostgreSQL の Internal Database URL |
+| `APP_ENV` | `production` |
+| `CORS_ALLOW_ORIGINS` | フロントエンドの本番 URL。カンマ区切り可 |
+| `PORT` | Render が自動設定するため通常は手動設定不要 |
+
+実際の `DATABASE_URL`、DB ユーザー名、DB パスワード、API キー、トークンは README、`render.yaml`、`.env` などに書いてコミットしません。
+
+### 手動デプロイ手順
+
+1. Render で PostgreSQL を作成する。
+2. PostgreSQL の Internal Database URL を控える。
+3. Render で Web Service を作成する。
+4. GitHub リポジトリを接続する。
+5. Build Command に `pip install -e .` を設定する。
+6. Start Command に `bash scripts/start_render.sh` を設定する。
+7. `DATABASE_URL` に Render PostgreSQL の Internal Database URL を設定する。
+8. `APP_ENV=production` を設定する。
+9. `CORS_ALLOW_ORIGINS` に本番フロントエンド URL を設定する。
+10. Deploy する。
+11. `/` と `/docs` を確認する。
+
+疎通確認:
+
+```bash
+curl https://YOUR_RENDER_SERVICE.onrender.com/
+```
+
+期待値:
+
+```json
+{"status":"ok"}
+```
+
+### 起動時に行うこと
+
+Render の Start Command は `scripts/start_render.sh` を実行します。
+
+```bash
+alembic upgrade head
+python -m scripts.seed_master_data
+uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
+```
+
+本番では FastAPI アプリの import 時や起動時に `Base.metadata.create_all()` でテーブルを自動作成しません。スキーマ変更は Alembic migration で管理します。
+
+### CORS 設定
+
+本番では `CORS_ALLOW_ORIGINS` に実際のフロントエンド URL だけを設定します。
+
+```text
+CORS_ALLOW_ORIGINS=https://your-frontend.example.com
+```
+
+複数ある場合はカンマ区切りです。
+
+```text
+CORS_ALLOW_ORIGINS=https://app.example.com,https://admin.example.com
+```
+
+`*` は使わないでください。資格情報付き CORS と `*` は組み合わせません。
+
+### render.yaml
+
+このリポジトリには Render Blueprint の例として `render.yaml` を置いています。
+
+```yaml
+databases:
+  - name: receipt-db
+    databaseName: receipt_db
+    user: receipt_user
+
+services:
+  - type: web
+    name: receipt-api
+    runtime: python
+    buildCommand: pip install -e .
+    startCommand: bash scripts/start_render.sh
+    envVars:
+      - key: APP_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: receipt-db
+          property: connectionString
+      - key: CORS_ALLOW_ORIGINS
+        value: https://your-frontend.example.com
+      - key: PYTHON_VERSION
+        value: "3.12"
+```
+
+`CORS_ALLOW_ORIGINS` は実際のフロントエンド URL に差し替えます。実際の DB 接続 URL やパスワードは直接書きません。
+
+### 注意点・よくある失敗
+
+- `DATABASE_URL` が未設定で SQLite に接続してしまう
+- Render PostgreSQL の External URL を誤って使い、同一リージョン内通信の想定から外れる
+- `CORS_ALLOW_ORIGINS` にフロントエンド URL が入っていない
+- `alembic upgrade head` が失敗してテーブルがない
+- Start Command が `uvicorn app.main:app` だけになっていて migration と seed が実行されない
+- 実際の DB 接続 URL やパスワードを README、`render.yaml`、`.env` に直接書いてしまう
+
 このリポジトリは、ユーザー確認済みのレシート購入履歴、商品マスタ、価格比較、在庫情報を扱う FastAPI バックエンドです。
 
 OCR API ではありません。画像アップロード、OCR 実行、レシート画像保存、OCR 仮データの永続保存、認証、ユーザー管理、世帯管理、レシピ提案 API はこのリポジトリでは扱いません。
@@ -1017,115 +1143,6 @@ base_unit is not null
 ```
 
 `raw_name` はレシート上の表記であり、最優先の alias 学習対象です。`normalized_name` は OCR や AI が推定した候補であり、DB 正式名とは限りません。そのため `POST /receipts/prepare` は `normalized_name` を自動で alias 登録しません。
-
-## Render デプロイ
-
-本番デプロイは Render Web Service + Render PostgreSQL を前提にします。
-
-```text
-API: Render Web Service
-DB: Render PostgreSQL
-DB接続: Render PostgreSQL の Internal Database URL
-Schema管理: Alembic
-ローカル開発DB: SQLite継続可
-```
-
-### Render に設定する値
-
-| 項目 | 値 |
-| --- | --- |
-| Build Command | `pip install -e .` |
-| Start Command | `bash scripts/start_render.sh` |
-| Runtime | Python |
-| Python version | `3.12` 系 |
-
-環境変数:
-
-| 変数 | 値 |
-| --- | --- |
-| `DATABASE_URL` | Render PostgreSQL の Internal Database URL |
-| `APP_ENV` | `production` |
-| `CORS_ALLOW_ORIGINS` | フロントエンドの本番 URL。カンマ区切り可 |
-| `PORT` | Render が自動設定するため通常は手動設定不要 |
-
-実際の `DATABASE_URL`、DB ユーザー名、DB パスワード、API キー、トークンはリポジトリにコミットしません。
-
-### 起動時に行うこと
-
-Render の Start Command は `scripts/start_render.sh` を実行します。
-
-```bash
-alembic upgrade head
-python -m scripts.seed_master_data
-uvicorn app.main:app --host 0.0.0.0 --port "${PORT:-8000}"
-```
-
-本番では FastAPI アプリの import 時や起動時に `Base.metadata.create_all()` でテーブルを自動作成しません。スキーマ変更は Alembic migration で管理します。
-
-### 手動デプロイ手順
-
-1. Render で PostgreSQL を作成する。
-2. Render で Web Service を作成する。
-3. GitHub リポジトリを接続する。
-4. Build Command に `pip install -e .` を設定する。
-5. Start Command に `bash scripts/start_render.sh` を設定する。
-6. `DATABASE_URL` に Render PostgreSQL の Internal Database URL を設定する。
-7. `APP_ENV=production` を設定する。
-8. `CORS_ALLOW_ORIGINS` に本番フロントエンド URL を設定する。
-9. Deploy する。
-10. `/` と `/docs` を確認する。
-
-疎通確認:
-
-```bash
-curl https://YOUR_RENDER_SERVICE.onrender.com/
-```
-
-期待値:
-
-```json
-{"status":"ok"}
-```
-
-### render.yaml
-
-このリポジトリには Render Blueprint の例として `render.yaml` を置いています。
-
-```yaml
-databases:
-  - name: receipt-db
-    databaseName: receipt_db
-    user: receipt_user
-
-services:
-  - type: web
-    name: receipt-api
-    runtime: python
-    buildCommand: pip install -e .
-    startCommand: bash scripts/start_render.sh
-    envVars:
-      - key: APP_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: receipt-db
-          property: connectionString
-      - key: CORS_ALLOW_ORIGINS
-        value: https://your-frontend.example.com
-      - key: PYTHON_VERSION
-        value: "3.12"
-```
-
-`CORS_ALLOW_ORIGINS` は実際のフロントエンド URL に差し替えます。
-
-### よくある失敗
-
-- `DATABASE_URL` が未設定で SQLite に接続してしまう
-- Render PostgreSQL の External URL を誤って使い、同一リージョン内通信の想定から外れる
-- `CORS_ALLOW_ORIGINS` にフロントエンド URL が入っていない
-- `alembic upgrade head` が失敗してテーブルがない
-- Start Command が `uvicorn app.main:app` だけになっていて migration と seed が実行されない
-- 実際の DB 接続 URL やパスワードを README や `render.yaml` に直接書いてしまう
 
 ## Alembic
 
