@@ -158,7 +158,7 @@ def test_get_receipt(client):
                 "id": body["items"][0]["id"],
                 "raw_name": "bread",
                 "normalized_name": "milk",
-                "product_id": None,
+                "product_id": body["items"][0]["product_id"],
                 "category_id": None,
                 "purchased_quantity": "1.00",
                 "purchased_unit": "本",
@@ -250,7 +250,13 @@ def test_list_receipts_uses_category_filter(client, db_session):
         raw_name="milk",
         category_id=category.id,
     )
-    create_receipt(client, total_amount=200, raw_name="soap", is_inventory_target=False)
+    create_receipt(
+        client,
+        total_amount=200,
+        raw_name="soap",
+        normalized_name="soap",
+        is_inventory_target=False,
+    )
 
     response = client.get(f"/receipts?category_id={category.id}")
 
@@ -385,15 +391,46 @@ def test_create_receipt_accepts_prepare_receipt(client, db_session):
     assert item["base_unit"] == "ml"
 
 
-def test_create_receipt_accepts_null_product_id_for_purchase_history(client):
+def test_create_receipt_auto_creates_product_for_null_product_id(client, db_session):
     response = client.post(
         "/receipts",
-        json=make_receipt_payload(product_id=None),
+        json=make_receipt_payload(
+            product_id=None,
+            raw_name="debug milk product id test",
+            normalized_name="debug milk product id test",
+            base_unit="ml",
+        ),
     )
 
     assert response.status_code == 201
     detail = client.get(f"/receipts/{response.json()['id']}").json()
-    assert detail["items"][0]["product_id"] is None
+    item = detail["items"][0]
+    product = db_session.get(Product, item["product_id"])
+    assert item["product_id"] is not None
+    assert product is not None
+    assert product.name == "debug milk product id test"
+    assert product.default_base_unit == "ml"
+
+
+def test_create_receipt_uses_existing_product_for_null_product_id(client, db_session):
+    product = Product(
+        name="milk",
+        name_key="milk",
+        default_base_unit="ml",
+        is_inventory_target=True,
+    )
+    db_session.add(product)
+    db_session.commit()
+
+    response = client.post(
+        "/receipts",
+        json=make_receipt_payload(product_id=None, normalized_name="milk"),
+    )
+
+    assert response.status_code == 201
+    detail = client.get(f"/receipts/{response.json()['id']}").json()
+    assert detail["items"][0]["product_id"] == product.id
+    assert db_session.query(Product).count() == 1
 
 
 def test_create_receipt_fills_product_defaults(client, db_session):

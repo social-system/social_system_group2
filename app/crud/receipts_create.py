@@ -2,7 +2,9 @@ from sqlalchemy.orm import Session
 
 from app.common.date import parse_yyyymmdd
 from app.receipts.models import AccountingCategory, Product, Receipt, ReceiptItem
-from app.schemas.receipts_requests import ReceiptCreate
+from app.schemas.receipts_requests import ReceiptCreate, ReceiptItemCreate
+from app.services.product_resolution import ProductResolutionInput, resolve_product
+from app.services.products import create_product
 
 
 def _get_referenced_products(db: Session, data: ReceiptCreate) -> dict[int, Product]:
@@ -25,6 +27,32 @@ def _validate_category_ids(db: Session, data: ReceiptCreate) -> None:
             raise ValueError(f"category_id does not exist: {category_id}")
 
 
+def _resolve_or_create_product(db: Session, item_data: ReceiptItemCreate) -> Product | None:
+    result = resolve_product(
+        db,
+        ProductResolutionInput(
+            product_id=None,
+            raw_name=item_data.raw_name,
+            normalized_name=item_data.normalized_name,
+        ),
+    )
+    if result.product_id is not None:
+        return db.get(Product, result.product_id)
+
+    product_name = item_data.normalized_name or item_data.raw_name
+    default_base_unit = item_data.base_unit or item_data.purchased_unit
+    if default_base_unit is None:
+        return None
+
+    return create_product(
+        db,
+        name=product_name,
+        default_base_unit=default_base_unit,
+        is_inventory_target=item_data.is_inventory_target,
+        default_category_id=item_data.category_id,
+    ).product
+
+
 def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
     products = _get_referenced_products(db, data)
     _validate_category_ids(db, data)
@@ -41,7 +69,10 @@ def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
     )
 
     for item_data in data.items:
-        product = products.get(item_data.product_id) if item_data.product_id is not None else None
+        if item_data.product_id is not None:
+            product = products.get(item_data.product_id)
+        else:
+            product = _resolve_or_create_product(db, item_data)
         normalized_name = item_data.normalized_name
         category_id = item_data.category_id
         if product is not None:
@@ -50,7 +81,7 @@ def create_receipt(db: Session, data: ReceiptCreate) -> Receipt:
 
         receipt.items.append(
             ReceiptItem(
-                product_id=item_data.product_id,
+                product_id=product.id if product is not None else None,
                 category_id=category_id,
                 raw_name=item_data.raw_name,
                 normalized_name=normalized_name,

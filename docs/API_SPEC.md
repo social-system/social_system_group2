@@ -267,6 +267,8 @@ items_total = sum(item.line_total)
 adjustment_amount = total_amount - items_total
 ```
 
+`product_id` が `null` の明細は、サーバーが `raw_name` / `normalized_name` から既存商品を解決する。解決できず、商品名と標準単位を明細から判断できる場合は、`products` を作成して採番された `products.id` を `receipt_items.product_id` に保存する。
+
 ### Success response
 
 Status: `201 Created`

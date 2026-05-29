@@ -582,6 +582,8 @@ items_total = sum(item.line_total)
 adjustment_amount = total_amount - items_total
 ```
 
+`product_id` が `null` の明細は、`raw_name` / `normalized_name` から既存商品を解決します。既存商品が見つからず、商品名と標準単位を明細から判断できる場合は、サーバーが `products` を作成して `receipt_items.product_id` に採番済みIDを保存します。
+
 `unit_price * purchased_quantity == line_total` は必須条件にしません。`total_amount == sum(line_total)` も必須条件にしません。
 
 成功レスポンス:
