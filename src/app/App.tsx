@@ -796,6 +796,9 @@ const deleteExpenseCall = async (id: string) => {
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
       const data = await response.json();
 
+     
+      console.log("レシピ出力:", data);
+
       if (data.recipes && Array.isArray(data.recipes)) {
         const newRecipes: Recipe[] = data.recipes.map((apiRecipe: any, index: number) => ({
           id: `ai-${Date.now()}-${index}`,
