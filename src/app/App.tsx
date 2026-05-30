@@ -565,6 +565,7 @@ const fetchExpenses = async () => {
       });
 
       if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
+      console.log("prepare出力確認", prepareResponse);
       const prepareData = await prepareResponse.json();
       const finalizedReceipt = prepareData.receipt;
 
