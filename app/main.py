@@ -10,7 +10,7 @@ from app.routes.products import router as products_router
 from app.routes.receipts import router as receipts_router
 
 
-DEFAULT_CORS_ALLOW_ORIGINS = ["http://localhost:5173"]
+DEFAULT_CORS_ALLOW_ORIGINS = ["http://localhost:5173","https://socialsystemgroup2.vercel.app"]
 
 
 def parse_cors_allow_origins(value: str | None) -> list[str]:
