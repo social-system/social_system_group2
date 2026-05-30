@@ -567,7 +567,9 @@ const fetchExpenses = async () => {
       if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
       console.log("prepare出力確認", prepareResponse);
       const prepareData = await prepareResponse.json();
+      console.log("prepare出力確認json", prepareData);
       const finalizedReceipt = prepareData.receipt;
+      console.log("prepare出力確認receipt", finalizedReceipt);
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
