@@ -499,30 +499,31 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       const isFoodCategory = expense.category === "食費";
       const storeNameStr = (expense.description || "").trim();
 
-      // 1. まず文字の入った有効な明細が配列にあるかチェック
+      // 1. 文字の入った有効な明細が配列にあるか抽出
       const validItems = Array.isArray(expense.items) 
         ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
         : [];
 
-      // 🚨【最重要：自動コピー対策】
-      // 明細が1件だけで、その名前が「店舗名(説明欄)」と完全に一致している、
-      // または明細名が「買い物」「レシート」などの場合は、画面の「詳細商品を追加」ボタンを押していない（一括登録）と判定する。
+      // 🚨【全カテゴリ共通・究極の一括登録判定判定】
+      // カテゴリが何であろうと、以下の場合は画面の「詳細商品を追加」ボタンを押していない【一括登録】とみなす
       let isBulkRegistration = false;
       if (validItems.length === 0) {
         isBulkRegistration = true;
       } else if (validItems.length === 1) {
         const firstName = validItems[0].raw_name.trim();
+        // 名前が店舗名と同じ、または数値だけ、または「買い物」などのプレースホルダーなら一括登録
         if (
           firstName === storeNameStr || 
           firstName === "買い物" || 
           firstName === "レシート" || 
-          firstName === "手動登録商品"
+          firstName === "手動登録商品" ||
+          !isNaN(Number(firstName)) // 👈 商品名が「111」などの数値だけになっている場合も一括登録と見なす！
         ) {
           isBulkRegistration = true;
         }
       }
 
-      // --- パターンA: 「詳細商品を追加」ボタンから、店舗名とは違う具体的な商品（肉など）を入力した場合 ---
+      // --- パターンA: どのカテゴリでも、詳細な商品をちゃんと入力して追加した場合 ---
       if (!isBulkRegistration) {
         const dateStr = `${String(dateNum).substring(0, 4)}-${String(dateNum).substring(4, 6)}-${String(dateNum).substring(6, 8)}`;
         const prepareBody = {
@@ -540,7 +541,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
             base_unit: item.base_unit || "個",
             unit_price: Number(item.unit_price) || 0,
             line_total: Number(item.line_total) || 0,
-            is_inventory_target: isFoodCategory
+            is_inventory_target: isFoodCategory // 食費のみ在庫対象
           }))
         };
 
@@ -574,26 +575,26 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         }
 
       } else {
-        // --- パターンB: 店舗名だけ入力し、詳細な商品は入力せず一括登録した場合 ---
-        // サーバーのお節介（prepare）を確実にスルーし、絶対に比較されない未知の名前で直接データベースに保存！
+        // --- パターンB: 全カテゴリ共通：詳細な商品は入力せず一括登録した場合 ---
+        // サーバーのprepareを確実にスルー！最初から価格比較対象外として直接データベースに保存する
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr || "手動登録店舗",
           total_amount: Number(expense.amount) || 0,
           items: [
             {
-              // サーバーに商品登録・自動紐付けされないよう一括用名前に固定
+              // どのカテゴリでも、サーバーに自動補完・汚染されない特別な名前に固定する
               raw_name: `手動一括（${expense.category || "その他"}）`,
               normalized_name: "詳細未入力の支出",
               product_id: null,  
               category_id: null, 
               purchased_quantity: 1,
               purchased_unit: "個",
-              base_quantity: null, // 👈 これを null にすることで最安値比較APIから100%除外されます
+              base_quantity: null, // 👈 これが null なので最安値比較APIの計算から100%永久に除外されます
               base_unit: null,     
               unit_price: Number(expense.amount) || 0,
               line_total: Number(expense.amount) || 0,
-              is_inventory_target: false // 在庫対象外
+              is_inventory_target: false // 在庫および比較対象外
             }
           ]
         };
