@@ -533,21 +533,25 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       }
 
       const isFoodCategory = expense.category === "食費";
-      const storeNameStr = (expense.description || "").trim() || "手動登録店舗";
+      
+      // 💡 【ポイント】店名の頭に自動で【手動】という目印を付与します。
+      // これにより、バックエンドの規約を汚さず、一覧表示の時に手動データだと見分けられます。
+      const rawStoreName = (expense.description || "").trim() || "手動登録店舗";
+      const storeNameStr = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
 
       // 1. 文字の入った有効な明細が配列にあるか抽出
       const validItems = Array.isArray(expense.items) 
         ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
         : [];
 
-      // 🚨【全カテゴリ共通・一括登録判定】
+      // 全カテゴリ共通・一括登録判定
       let isBulkRegistration = false;
       if (validItems.length === 0) {
         isBulkRegistration = true;
       } else if (validItems.length === 1) {
         const firstName = validItems[0].raw_name.trim();
         if (
-          firstName === storeNameStr || 
+          firstName === rawStoreName || 
           firstName === "買い物" || 
           firstName === "レシート" || 
           firstName === "手動登録商品" ||
@@ -590,13 +594,11 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         const finalizedReceipt = prepareData.receipt;
 
         if (finalizedReceipt) {
-          // 🚨 サーバー側へ「手動登録」であることを示すフラグを付与
+          // 🚨 【修正】extra_forbidden を回避するため、is_manual や source_type を完全削除！
           const cleansedPayload: any = {
-            store_name: storeNameStr, // ユーザーが入力した店名を最優先
+            store_name: storeNameStr, 
             purchased_at: dateNum,
             total_amount: Number(expense.amount) || 0,
-            is_manual: true, // 👈 これによりfetchExpensesで確実に「手動入力」と判定される
-            source_type: "manual", // 👈 バックアップ用フラグ
             items: []
           };
 
@@ -606,7 +608,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
               normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
               product_id: isFoodCategory ? (item.product_id || null) : null,
               category_id: item.category_id || null,
-              is_inventory_target: isFoodCategory, // 食費のみ在庫対象（消費状態ならココをfalseにするロジックと連動）
+              is_inventory_target: isFoodCategory, 
               purchased_quantity: Number(item.purchased_quantity) || 1,
               purchased_unit: item.purchased_unit || "個",
               unit_price: Number(item.unit_price) || 0,
@@ -626,12 +628,11 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       } else {
         // --- パターンB: 詳細な商品は入力せず、一括金額だけで登録した場合 ---
+        // 🚨 【修正】ここからも extra_forbidden の原因だったフィールドを削除
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr,
           total_amount: Number(expense.amount) || 0,
-          is_manual: true,      // 👈 読み込み時に「手動入力」ラベルにするためのキモ
-          source_type: "manual", // 👈 同上
           items: [
             {
               raw_name: `手動一括（${expense.category || "その他"}）`,
@@ -644,7 +645,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
               base_unit: null,     
               unit_price: Number(expense.amount) || 0,
               line_total: Number(expense.amount) || 0,
-              is_inventory_target: false // 在庫および比較対象外（消費された状態）
+              is_inventory_target: false // 在庫管理には入らない（消費された状態）
             }
           ]
         };
@@ -820,12 +821,11 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
     setShopPrices([]); 
 
     try {
-      // 💡 【修正のキモ】productIdがなくても、isInFridgeがfalse（冷蔵庫にない）ならすべて「足りない材料」として抽出する
+      // 1. 冷蔵庫にない「要購入」の材料を抽出
       const missingIngredients = recipe.ingredients.filter(
         ing => !ing.isInFridge
       );
 
-      // 足りない材料が一切ない場合は、合計0円として処理を抜ける
       if (missingIngredients.length === 0) {
         setShopPrices([
           { shopName: "すべての材料が冷蔵庫に揃っています！", totalPrice: 0 }
@@ -836,18 +836,34 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
 
       let cheapestStoreName = "";
       let cheapestStoreTotal = 0;
-      let fallbackTotal = 0; // 過去の購入データがない食材の目安合計金額
+      let fallbackTotal = 0; 
 
       // 2. 足りない材料すべての価格を計算
       await Promise.all(
         missingIngredients.map(async (ing) => {
           const neededQty = parseFloat(ing.amount) || 1.00;
+          
+          // 💡 【修正のキモ：辞書を使わない自動名前マッチング】
+          // AIからproductIdが来ていない場合、アプリが保持している商品マスター（products）から
+          // 食材名（例:「キャベツ」）が含まれる商品を自動検索してIDを特定します。
+          let pId = ing.productId && ing.productId > 0 ? ing.productId : null;
+          
+          if (!pId && typeof products !== "undefined" && Array.isArray(products)) {
+            // products配列（{ id: number, name: string } のような構造を想定）から検索
+            const matchedProduct = products.find((p: any) => 
+              p && p.name && (ing.name.includes(p.name) || p.name.includes(ing.name))
+            );
+            if (matchedProduct) {
+              pId = matchedProduct.id;
+              console.log(`【品名から自動検索成功】「${ing.name}」を商品リストから「${matchedProduct.name} (ID:${pId})」として特定しました。`);
+            }
+          }
 
-          // 💡 productIdが存在する場合のみバックエンドの最安値を取得しに行く
-          if (ing.productId && ing.productId > 0) {
+          // 商品IDが特定できた（または元からあった）場合は最安値APIへリクエスト
+          if (pId) {
             try {
               const response = await fetch(
-                `${kakeibo_URL}/prices/cheapest?product_id=${ing.productId}&period_days=90`
+                `${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`
               );
               
               if (response.ok) {
@@ -859,29 +875,27 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
 
                   cheapestStoreName = cheapestInfo.store_name; 
                   cheapestStoreTotal += costForThisIngredient;
-                  fallbackTotal += costForThisIngredient; // 1品ごとの合計に加算
+                  fallbackTotal += costForThisIngredient; 
                   return;
                 }
               }
             } catch (e) {
-              console.warn(`商品ID:${ing.productId} の最安値取得に失敗`, e);
+              console.warn(`商品ID:${pId} (${ing.name}) の最安値取得に失敗`, e);
             }
           }
 
-          // 💡 productIdがない食材（過去に家計簿に登録したことがない新規食材など）は、
-          // 1品あたり一律300円の目安価格としてシミュレーションに加算する
+          // データベースに存在しない新規食材などの場合の目安価格
           fallbackTotal += 300;
         })
       );
 
-      // 3. 計算結果から、すべての足りない材料の合計購入目安を組み立てる
+      // 3. 計算結果の組み立て
       const finalCheapestStore = cheapestStoreName || "周辺スーパー";
       const finalBasePrice = Math.round(cheapestStoreTotal > 0 ? cheapestStoreTotal : fallbackTotal);
 
-      // ✨ 最安値店舗（1位）のデータだけを配列に格納
       const singleCheapestEstimate: ShopPriceEstimate[] = [
         { 
-          shopName: cheapestStoreName ? `${finalCheapestStore} (過去最安値)` : `${finalCheapestStore} (周辺目安価格)`, 
+          shopName: cheapestStoreName ? `${finalCheapestStore} (過去最安値店)` : `${finalCheapestStore} (周辺目安価格)`, 
           totalPrice: finalBasePrice,
           deliveryFee: 0
         }
