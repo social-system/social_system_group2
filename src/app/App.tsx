@@ -872,12 +872,23 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
 
                   // 品名の部分一致をチェック
                   if (ingName.includes(name) || name.includes(ingName)) {
-                    // 💡 item.line_total や item.purchased_quantity が既に number 型の場合を考慮し、Number() で安全に数値化
+                    
+                    // 💡【最重要修正】店名に「手動在庫追加」が含まれている場合は価格算出の対象外にしてスキップ
+                    if (storeName === "手動在庫追加" || storeName.includes("手動在庫追加")) {
+                      continue;
+                    }
+
+                    // item.line_total や item.purchased_quantity が既に number 型の場合を考慮し、Number() で安全に数値化
                     const total = Number(item.line_total) || 0;
-                    const qty = Number(item.purchased_quantity) || 1; // 👈 parseFloat を外し、型衝突を解消
+                    const qty = Number(item.purchased_quantity) || 1;
                     const unitPrice = total / (qty > 0 ? qty : 1);
 
-                    if (unitPrice > 0 && unitPrice < localCheapestPrice) {
+                    // 💡【追加ガード】単価が0円以下のデータ（手動登録による0円など）も確実にスキップ
+                    if (unitPrice <= 0) {
+                      continue;
+                    }
+
+                    if (unitPrice < localCheapestPrice) {
                       localCheapestPrice = unitPrice;
                       localCheapestStore = storeName;
                     }
