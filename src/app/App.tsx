@@ -389,7 +389,7 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
       }
 
-      // ユーザーが明示的に個別商品リスト(items)を入力して渡してきたか判定
+      // ユーザーが個別商品リスト(items)を入力、または手動在庫から渡してきたか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
 
       const prepareBody = {
@@ -399,16 +399,16 @@ const submitReceiptPayload = async (requestBody: any) => {
         total_amount: Number(requestBody.total_amount) || 0, 
         items: hasItems 
           ? requestBody.items.map((item: any) => {
-              const isFood = item.category_name === "食費" || item.normalized_name === "食費";
+              // 「食費」または手動在庫追加の場合は在庫対象にする
+              const isFood = item.category_name === "食費" || item.normalized_name === "食費" || requestBody.store_name === "手動在庫追加";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
                 normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-                // 空、null、undefinedの場合は一律 null としてサーバーへ送る
-                category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : null, 
+                category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
-                base_quantity: isFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
-                base_unit: isFood ? (item.base_unit || item.purchased_unit || "個") : null,
+                base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
+                base_unit: item.base_unit || item.purchased_unit || "個",
                 unit_price: Number(item.unit_price) || 0,
                 line_total: Number(item.line_total) || 0,
                 is_inventory_target: isFood,
@@ -448,9 +448,8 @@ const submitReceiptPayload = async (requestBody: any) => {
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
       // 🚨 【422 extra_forbidden 完全撃退フィルター】
-      // バックエンドが本登録（/receipts）で受け付ける「許可された項目」だけでデータを再構築します。
       const cleansedPayload: any = {
-        store_name: finalizedReceipt.store_name || "店舗名未設定",
+        store_name: prepareBody.store_name, // 補完で勝手に上書きされないよう元の店名を維持
         purchased_at: typeof finalizedReceipt.purchased_at === 'string'
           ? Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''))
           : Number(finalizedReceipt.purchased_at) || 20260531,
@@ -459,8 +458,8 @@ const submitReceiptPayload = async (requestBody: any) => {
       };
 
       if (Array.isArray(finalizedReceipt.items)) {
-        cleansedPayload.items = finalizedReceipt.items.map((item: any) => {
-          // 1. 一括登録（明細なし）の場合のすり抜け防止
+        cleansedPayload.items = finalizedReceipt.items.map((item: any, idx: number) => {
+          // 1. 完全に「詳細明細がない」一括登録の場合のみ、ダミー明細にする
           if (!hasItems) {
             return {
               raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
@@ -477,25 +476,23 @@ const submitReceiptPayload = async (requestBody: any) => {
             };
           }
 
-          // 2. レシピ適応や通常詳細入力のケース
-          const finalCategory = item.category_name || "";
-          const finalNormName = item.normalized_name || "";
-          const isRealFood = finalCategory === "食費" || finalNormName === "食費";
+          // 2. 通常の詳細入力、または手動在庫追加の場合
+          // requestBody.items から元の名前や数量などの設定をサルベージする
+          const originalItem = requestBody.items[idx] || requestBody.items[0] || {};
+          const isHandledInventory = prepareBody.store_name === "手動在庫追加";
 
-          // ⚠️ サーバーが「Extra inputs are not permitted」で怒るため、
-          // category_name, confidence, warnings などの禁止キーを完全に排除してリターンします
           return {
-            raw_name: (item.raw_name || "手動登録商品").trim(),
-            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            product_id: isRealFood ? (item.product_id || null) : null, 
-            category_id: item.category_id || null,
-            is_inventory_target: isRealFood,
-            purchased_quantity: Number(item.purchased_quantity) || 1, 
-            purchased_unit: item.purchased_unit || "個",
-            unit_price: Number(item.unit_price) || 0,
-            line_total: Number(item.line_total) || 0,
-            base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
-            base_unit: isRealFood ? (item.base_unit || "個") : null 
+            raw_name: (originalItem.raw_name || item.raw_name || "手動登録商品").trim(),
+            normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
+            product_id: isHandledInventory ? 1 : (item.product_id || null), // 手動在庫追加の時は仕様に合わせる
+            category_id: isHandledInventory ? 1 : (item.category_id || null),
+            is_inventory_target: isHandledInventory ? true : (item.category_name === "食費" || item.normalized_name === "食費"),
+            purchased_quantity: Number(originalItem.purchased_quantity || item.purchased_quantity) || 1, 
+            purchased_unit: originalItem.purchased_unit || item.purchased_unit || "個",
+            unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
+            line_total: Number(originalItem.line_total || item.line_total) || 0,
+            base_quantity: Number(originalItem.base_quantity || item.base_quantity || item.purchased_quantity) || 1, 
+            base_unit: originalItem.base_unit || item.base_unit || "個"
           };
         });
       }
@@ -506,7 +503,7 @@ const submitReceiptPayload = async (requestBody: any) => {
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleansedPayload), // 👈 ここを finalizedReceipt から cleansedPayload に変更
+        body: JSON.stringify(cleansedPayload), 
       });
 
       if (!response.ok) {
@@ -518,9 +515,9 @@ const submitReceiptPayload = async (requestBody: any) => {
       await fetchExpenses();
     } catch (err) {
       console.error("送信プロセス失敗:", err);
+      alert("データの保存に失敗しました。バックエンドのバリデーションを確認してください。");
     }
   };
-
 const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
     try {
       let dateNum = 20260531;
