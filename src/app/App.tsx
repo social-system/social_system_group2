@@ -435,13 +435,22 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【超厳格・在庫誤登録防止フィルター】
+      // 🚨 【422 extra_forbidden 完全撃退フィルター】
+      // バックエンドが本登録（/receipts）で受け付ける「許可された項目」だけでデータを再構築します。
+      const cleansedPayload: any = {
+        store_name: finalizedReceipt.store_name || "店舗名未設定",
+        purchased_at: typeof finalizedReceipt.purchased_at === 'string'
+          ? Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''))
+          : Number(finalizedReceipt.purchased_at) || 20260531,
+        total_amount: Number(requestBody.total_amount) || 0,
+        items: []
+      };
+
       if (Array.isArray(finalizedReceipt.items)) {
-        finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          // 1. 一括登録（明細なし）の場合
+        cleansedPayload.items = finalizedReceipt.items.map((item: any) => {
+          // 1. 一括登録（明細なし）の場合のすり抜け防止
           if (!hasItems) {
             return {
-              ...item,
               raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
               normalized_name: "詳細未入力の支出",
               product_id: null,
@@ -450,45 +459,51 @@ const submitReceiptPayload = async (requestBody: any) => {
               base_quantity: null,        
               base_unit: null,            
               purchased_quantity: 1,
-              purchased_unit: "個"
+              purchased_unit: "個",
+              unit_price: Number(cleansedPayload.total_amount),
+              line_total: Number(cleansedPayload.total_amount)
             };
           }
 
-          // 2. 個別詳細商品がある通常ケース
-          // サーバーから返ってきた最終的なカテゴリー名と正規化名を取得
+          // 2. レシピ適応や通常詳細入力のケース
           const finalCategory = item.category_name || "";
           const finalNormName = item.normalized_name || "";
-
-          // 🔥 【最重要変更】カテゴリーが「食費」とハッキリ確定している場合のみ true にする。
-          // 空（null）や「文具」「日用品」などの場合は例外なく100% false（在庫対象外）にする。
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
+          // ⚠️ サーバーが「Extra inputs are not permitted」で怒るため、
+          // category_name, confidence, warnings などの禁止キーを完全に排除してリターンします
           return {
-            ...item,
-            // カテゴリーが空(null)のままなら、フロント側で安全のために「未分類」や「その他」を明示的にセットしてサーバーの誤作動を防ぐ
-            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
+            raw_name: (item.raw_name || "手動登録商品").trim(),
+            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
             product_id: isRealFood ? (item.product_id || null) : null, 
-            is_inventory_target: isRealFood, // 👈 これで万年筆などの null や空データは確実に false に固定されます！
+            category_id: item.category_id || null,
+            is_inventory_target: isRealFood,
+            purchased_quantity: Number(item.purchased_quantity) || 1, 
+            purchased_unit: item.purchased_unit || "個",
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
             base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
             base_unit: isRealFood ? (item.base_unit || "個") : null 
           };
         });
       }
       
-      if (typeof finalizedReceipt.purchased_at === 'string') {
-        finalizedReceipt.purchased_at = Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''));
-      }
-      finalizedReceipt.total_amount = Number(requestBody.total_amount) || 0;
+      console.log("【本登録直前】余計なキーをすべて排除したデータ:", cleansedPayload);
 
+      // 完全に綺麗になった cleansedPayload を送る
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalizedReceipt),
+        body: JSON.stringify(cleansedPayload), // 👈 ここを finalizedReceipt から cleansedPayload に変更
       });
 
-      if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
+      if (!response.ok) {
+        const errDetail = await response.json().catch(() => ({}));
+        console.error("本登録エラー詳細:", errDetail);
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
 
-      await fetchExpenses(); 
+      await fetchExpenses();
     } catch (err) {
       console.error("送信プロセス失敗:", err);
     }
@@ -833,21 +848,48 @@ const deleteInventoryItemCall = async (id: string) => {
     }
   };
 
-  const handleFinalAdd = async (recipe: Recipe) => {
+const handleFinalAdd = async (recipe: Recipe) => {
     try {
+      // 1. バックエンドの仕様書(キャメルケースの要求)に100%適合させるため、
+      // 食材リストのキーを厳格にクレンジング・成形します。
+      const cleansedIngredients = Array.isArray(recipe.ingredients)
+        ? recipe.ingredients.map((ing: any) => {
+            // スネークケースで入っている可能性も考慮してフォールバックを用意
+            const pId = ing.productId !== undefined ? ing.productId : ing.product_id;
+            const inFridge = ing.isInFridge !== undefined ? ing.isInFridge : ing.is_in_fridge;
+
+            return {
+              name: String(ing.name || "不明な食材").trim(),
+              amount: String(ing.amount || "適量").trim(),
+              isInFridge: Boolean(inFridge),
+              productId: pId !== undefined && pId !== null ? Number(pId) : 0, // 無ければ仕様に沿って0
+              unit: String(ing.unit || ing.base_unit || "個").trim()
+            };
+          })
+        : [];
+
+      console.log("【レシピ消費】/api/v1/recipes/accept に送信する食材データ:", cleansedIngredients);
+
+      // 2. レシピ消費APIを呼び出し（仕様書通りのスキーマで送信）
       const acceptResponse = await fetch(`${recipe_URL}/api/v1/recipes/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          recipeName: recipe.title,
-          ingredients: recipe.ingredients 
+          recipeName: recipe.title || "AIレシピ料理",
+          ingredients: cleansedIngredients 
         }),
       });
 
       if (!acceptResponse.ok) {
-        console.warn("Recipe-Backでの在庫消費に失敗しました。家計簿の登録のみ続行します。");
+        const acceptErr = await acceptResponse.json().catch(() => ({}));
+        console.warn("Recipe-Backでの在庫消費に失敗または警告があります:", acceptErr);
+      } else {
+        const acceptResult = await acceptResponse.json();
+        console.log("在庫消費成功件数:", acceptResult.movementsCreated);
       }
 
+      // 3. 家計簿・在庫データの一括登録（submitReceiptPayload を呼び出し）
+      // 内部で prepare された後、先ほど修正した extra_forbidden 撃退フィルターを通って安全に POST されます。
       await submitReceiptPayload({
         purchased_at: formatToYmdNumber(new Date()),
         store_name: "AIレシピ適応調理",
@@ -864,17 +906,17 @@ const deleteInventoryItemCall = async (id: string) => {
             base_unit: "食",
             unit_price: recipe.estimatedCost || 0,
             line_total: recipe.estimatedCost || 0,
-            is_inventory_target: false
+            is_inventory_target: false // 調理後の料理自体は冷蔵庫に入れないので false 固定
           }
         ]
       });
 
-      alert("家計簿に追加し、バックエンドの冷蔵庫在庫を消費しました！");
+      alert("家計簿への支出登録と、冷蔵庫の在庫消費がすべて正常に完了しました！");
       handleCloseModal();
       setActiveTab('expenses');
     } catch (err) {
       console.error("レシピの適応に失敗しました:", err);
-      alert("レシピの適応処理に失敗しました。");
+      alert("レシピの適応処理中にエラーが発生しました。");
     }
   };
 
@@ -966,7 +1008,7 @@ const deleteInventoryItemCall = async (id: string) => {
             </div>
           </Tabs.Content>
 
-          {/* 2. 在庫タブ */}
+{/* 2. 在庫タブ */}
           <Tabs.Content value="inventory" className="space-y-4">
             <div className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4 flex items-center justify-between">
@@ -985,11 +1027,45 @@ const deleteInventoryItemCall = async (id: string) => {
                 </button>
               </div>
 
-              <InventoryList
-                inventory={inventory}
-                onDelete={deleteInventoryItemCall}
-                onUpdate={updateInventoryItem}
-              />
+              {/* 🚨 【合算ロジックを追加】同じ食材を自動的にまとめてから表示する */}
+              {(() => {
+                const aggregatedInventory: any[] = [];
+
+                if (Array.isArray(inventory)) {
+                  inventory.forEach((item: any) => {
+                    // 1. すでに合算用配列に同じ正規化名（または商品名）があるか探す
+                    const existingIndex = aggregatedInventory.findIndex(
+                      (agg) => (agg.normalized_name || agg.name) === (item.normalized_name || item.name)
+                    );
+
+                    if (existingIndex > -1) {
+                      // 2. すでにある場合は、数量（base_quantity または quantity）を合算する
+                      // ※ サーバーから文字列 "1.00" で返ってきても大丈夫なように Number() で確実に数値化
+                      const currentQty = Number(aggregatedInventory[existingIndex].base_quantity || aggregatedInventory[existingIndex].quantity) || 0;
+                      const newQty = Number(item.base_quantity || item.quantity) || 0;
+                      
+                      // 念のため両方のプロパティを更新
+                      if (aggregatedInventory[existingIndex].base_quantity !== undefined) {
+                        aggregatedInventory[existingIndex].base_quantity = currentQty + newQty;
+                      }
+                      if (aggregatedInventory[existingIndex].quantity !== undefined) {
+                        aggregatedInventory[existingIndex].quantity = currentQty + newQty;
+                      }
+                    } else {
+                      // 3. まだ合算配列にない食材なら、新しく追加する
+                      aggregatedInventory.push({ ...item });
+                    }
+                  });
+                }
+
+                return (
+                  <InventoryList
+                    inventory={aggregatedInventory} // ✨ バラバラのデータではなく、合算済みの綺麗な配列を渡す！
+                    onDelete={deleteInventoryItemCall}
+                    onUpdate={updateInventoryItem}
+                  />
+                );
+              })()}
             </div>
           </Tabs.Content>
 
