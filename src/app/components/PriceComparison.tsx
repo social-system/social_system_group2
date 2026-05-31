@@ -46,6 +46,17 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
       expense.items.forEach((item) => {
         // App.tsx の仕様に合わせて item.raw_name を取得
         const name = item.raw_name || '不明な食材';
+        
+        // 🚨 【価格比較ガード】「手動一括」や「詳細未入力」などのダミー明細は集計から完全に除外する
+        if (
+          name.includes("手動一括") || 
+          name.includes("詳細未入力") || 
+          name.includes("買い物") ||
+          name === "a"
+        ) {
+          return; // 該当した場合はこの明細をスキップ
+        }
+
         const itemNameLower = name.toLowerCase();
         
         // 数量・単位・合計金額の取得 (App.tsx のプロパティ名に完全準拠)
