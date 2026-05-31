@@ -850,11 +850,9 @@ const deleteInventoryItemCall = async (id: string) => {
 
 const handleFinalAdd = async (recipe: Recipe) => {
     try {
-      // 1. バックエンドの仕様書(キャメルケースの要求)に100%適合させるため、
-      // 食材リストのキーを厳格にクレンジング・成形します。
+      // 1. バックエンドの仕様に合わせて食材リストを厳格に成形
       const cleansedIngredients = Array.isArray(recipe.ingredients)
         ? recipe.ingredients.map((ing: any) => {
-            // スネークケースで入っている可能性も考慮してフォールバックを用意
             const pId = ing.productId !== undefined ? ing.productId : ing.product_id;
             const inFridge = ing.isInFridge !== undefined ? ing.isInFridge : ing.is_in_fridge;
 
@@ -862,7 +860,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
               name: String(ing.name || "不明な食材").trim(),
               amount: String(ing.amount || "適量").trim(),
               isInFridge: Boolean(inFridge),
-              productId: pId !== undefined && pId !== null ? Number(pId) : 0, // 無ければ仕様に沿って0
+              productId: pId !== undefined && pId !== null ? Number(pId) : 0,
               unit: String(ing.unit || ing.base_unit || "個").trim()
             };
           })
@@ -870,7 +868,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
 
       console.log("【レシピ消費】/api/v1/recipes/accept に送信する食材データ:", cleansedIngredients);
 
-      // 2. レシピ消費APIを呼び出し（仕様書通りのスキーマで送信）
+      // 2. レシピ消費APIを呼び出して、冷蔵庫システム側の在庫を減らす
       const acceptResponse = await fetch(`${recipe_URL}/api/v1/recipes/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -888,32 +886,16 @@ const handleFinalAdd = async (recipe: Recipe) => {
         console.log("在庫消費成功件数:", acceptResult.movementsCreated);
       }
 
-      // 3. 家計簿・在庫データの一括登録（submitReceiptPayload を呼び出し）
-      // 内部で prepare された後、先ほど修正した extra_forbidden 撃退フィルターを通って安全に POST されます。
-      await submitReceiptPayload({
-        purchased_at: formatToYmdNumber(new Date()),
-        store_name: "AIレシピ適応調理",
-        total_amount: recipe.estimatedCost || 0,
-        items: [
-          {
-            raw_name: recipe.title || "AIレシピ料理",
-            normalized_name: recipe.title || "AIレシピ料理",
-            product_id: 1,
-            category_id: 1,
-            purchased_quantity: 1,
-            purchased_unit: "食",
-            base_quantity: 1,
-            base_unit: "食",
-            unit_price: recipe.estimatedCost || 0,
-            line_total: recipe.estimatedCost || 0,
-            is_inventory_target: false // 調理後の料理自体は冷蔵庫に入れないので false 固定
-          }
-        ]
-      });
+      // 🚨 【修正のキモ】
+      // ここにあった `await submitReceiptPayload({...})` (家計簿へのダミー支出追加) を完全に削除しました！
+      // これにより、家計簿に「AIレシピ適応調理」という項目が勝手に追加されることはなくなります。
 
-      alert("家計簿への支出登録と、冷蔵庫の在庫消費がすべて正常に完了しました！");
+      // 3. 冷蔵庫の最新の在庫バランス（数量）をサーバーから再取得して、画面を最新の状態にする
+      await fetchInventoryBalances();
+
+      alert("レシピで使用した食材を冷蔵庫から消費しました！");
       handleCloseModal();
-      setActiveTab('expenses');
+      setActiveTab('inventory'); // 減った在庫を確認できるように自動的に「在庫タブ」に切り替えます
     } catch (err) {
       console.error("レシピの適応に失敗しました:", err);
       alert("レシピの適応処理中にエラーが発生しました。");
