@@ -144,7 +144,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
 // 登録ボタンを押した時の処理（手動追加と同じ項目・構造に揃えて prepare に投げる）
 // 登録ボタンを押した時の処理（prepareの返却値をそのまま本登録へ流す形に修正）
 // 登録ボタンを押した時の処理（prepareを通してから本登録する確定版）
-  const handleConfirmCall = async () => {
+const handleConfirmCall = async () => {
     if (!capturedImage) return;
     setIsProcessing(true);
 
@@ -160,27 +160,32 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
         }
       }
 
-      // 2. 余計な ID（product_id や category_id）を一切含まない、純粋な下書きオブジェクトを組み立てる
+      // 2. 余計な ID を含まない、純粋な下書きオブジェクトを組み立てる
       const prepareBody = {
         status: "needs_confirmation",
         store_name: (extractedData.store_name || "SHOP").trim(),
         purchased_at: dateStr,
         total_amount: Number(extractedData.total_amount) || 0,
         items: Array.isArray(extractedData.items)
-          ? extractedData.items.map((item: any) => ({
-              raw_name: (item.raw_name || "不明な商品").trim(),
-              normalized_name: (item.normalized_name || item.raw_name || "不明な商品").trim(),
-              category_name: item.category_name || "食費", // 文字列のみを指定
-              purchased_quantity: Number(item.purchased_quantity) || 1,
-              purchased_unit: item.purchased_unit || "個",
-              base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
-              base_unit: item.base_unit || item.purchased_unit || "個",
-              unit_price: Number(item.unit_price) || 0,
-              line_total: Number(item.line_total) || 0,
-              is_inventory_target: true, // カメラからの登録は在庫連動をONにする
-              confidence: 1.0,
-              warnings: []
-            }))
+          ? extractedData.items.map((item: any) => {
+              // 事前に食費と分かっている場合のみ初期仮フラグを立てる
+              const isFood = item.category_name === "食費" || item.normalized_name === "食費";
+              return {
+                raw_name: (item.raw_name || "不明な商品").trim(),
+                normalized_name: (item.normalized_name || item.raw_name || "不明な商品").trim(),
+                // ✨ 勝手に "食費" と決めつけず、空欄(nullや未定義)の場合は null のまま渡してサーバーに推測させる
+                category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : null, 
+                purchased_quantity: Number(item.purchased_quantity) || 1,
+                purchased_unit: item.purchased_unit || "個",
+                base_quantity: isFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
+                base_unit: isFood ? (item.base_unit || item.purchased_unit || "個") : null,
+                unit_price: Number(item.unit_price) || 0,
+                line_total: Number(item.line_total) || 0,
+                is_inventory_target: isFood, // ✨ 最初から文具と分かっていればここでfalseになる
+                confidence: 1.0,
+                warnings: []
+              };
+            })
           : [],
         warnings: []
       };
@@ -201,20 +206,32 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
       }
       
       const prepareData = await prepareResponse.json();
-      
-      // バックエンドが正常に補完・パースしてくれた本登録用のオブジェクトを取り出す
       const finalReceiptPayload = prepareData.receipt;
 
       if (!finalReceiptPayload) {
         throw new Error("サーバーから返ってきた receipt オブジェクトが空です。");
       }
 
-      // 4. バックエンドが作った finalReceiptPayload のアイテムを、強制的に在庫対象(true)にする
+      // 🚨 【超重要・最強の水際フィルター】
+      // サーバーが確定させた最終結果を見て、「食費」以外の文具・日用品は絶対に在庫から弾く！
       if (Array.isArray(finalReceiptPayload.items)) {
-        finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => ({
-          ...item,
-          is_inventory_target: true
-        }));
+        finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => {
+          const finalCategory = item.category_name || "";
+          const finalNormName = item.normalized_name || "";
+          
+          // 🔥 カテゴリー名または正規化名が確実に「食費」である場合のみ true にする！
+          // これにより「文具」や空(null)のデータは100% false（在庫対象外）に書き換わります。
+          const isRealFood = finalCategory === "食費" || finalNormName === "食費";
+
+          return {
+            ...item,
+            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
+            product_id: isRealFood ? (item.product_id || null) : null,
+            is_inventory_target: isRealFood, // 👈 サーバーの誤作動や以前の一律一括指定をここで完全撃退！
+            base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
+            base_unit: isRealFood ? (item.base_unit || "個") : null
+          };
+        });
       }
 
       console.log("【2/2】/receipts（本登録）に送信する確定データ:", finalReceiptPayload);
@@ -234,7 +251,7 @@ const analyzeImageCall = async (imageUrl: string): Promise<ExtractedData> => {
 
       const resData = await response.json();
       const createdId = resData.id || resData.receipt_id || 'success';
-      alert(`確定レシートと在庫を同期登録しました！ (レシートID: ${createdId})`);
+      alert(`確定レシートと家計簿の同期登録を完了しました！ (レシートID: ${createdId})`);
 
       onCapture(); // App.tsx 側の最新データ再取得をトリガー
       stopCamera();
