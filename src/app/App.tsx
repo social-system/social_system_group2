@@ -499,57 +499,99 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       const isFoodCategory = expense.category === "食費";
       const harmsSpecificItems = expense.items && expense.items.length > 0;
 
-      const requestBody = {
-        purchased_at: dateNum,
-        // 画面の支出一覧に表示される店舗名はユーザーの入力通りにする
-        store_name: (expense.description || "手動登録店舗").trim(),
-        total_amount: Number(expense.amount) || 0,
-        items: harmsSpecificItems 
-          ? expense.items?.map((item) => ({
-              raw_name: item.raw_name.trim(),
-              normalized_name: item.normalized_name.trim(),
-              product_id: item.product_id || null,  
-              category_id: item.category_id || null, 
-              purchased_quantity: Number(item.purchased_quantity) || 1,
-              purchased_unit: item.purchased_unit || "個",
-              base_quantity: isFoodCategory ? (Number(item.base_quantity) || 1) : null,
-              base_unit: isFoodCategory ? (item.base_unit || "個") : null,
-              unit_price: Number(item.unit_price) || Number(expense.amount),
-              line_total: Number(item.line_total) || Number(expense.amount),
+      // --- パターンA: ちゃんと商品を追加した場合 ---
+      if (harmsSpecificItems) {
+        // 1. まずサーバーの自動補完(prepare)に一度投げて、product_idなどを解決してもらう
+        const dateStr = `${String(dateNum).substring(0, 4)}-${String(dateNum).substring(4, 6)}-${String(dateNum).substring(6, 8)}`;
+        const prepareBody = {
+          status: "needs_confirmation",
+          store_name: (expense.description || "手動登録店舗").trim(),
+          purchased_at: dateStr,
+          total_amount: Number(expense.amount) || 0,
+          items: expense.items?.map((item) => ({
+            raw_name: item.raw_name.trim(),
+            normalized_name: item.normalized_name.trim(),
+            category_name: expense.category || "食費",
+            purchased_quantity: Number(item.purchased_quantity) || 1,
+            purchased_unit: item.purchased_unit || "個",
+            base_quantity: Number(item.base_quantity) || 1,
+            base_unit: item.base_unit || "個",
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
+            is_inventory_target: isFoodCategory
+          }))
+        };
+
+        const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(prepareBody),
+        });
+
+        if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
+        const prepareData = await prepareResponse.json();
+        const finalizedReceipt = prepareData.receipt;
+
+        // 2. サーバーから補完されて戻ってきたデータ（product_id等が入ったもの）を確定保存
+        if (finalizedReceipt) {
+          finalizedReceipt.purchased_at = dateNum;
+          finalizedReceipt.total_amount = Number(expense.amount) || 0;
+
+          // 念のためフロント側の食費判定に従って在庫ターゲットを上書き
+          if (Array.isArray(finalizedReceipt.items)) {
+            finalizedReceipt.items = finalizedReceipt.items.map((item: any) => ({
+              ...item,
               is_inventory_target: isFoodCategory
-            }))
-          : [
-              {
-                // ❌ 「買い物」という名前を使うとサーバーがID:20に自動解決してしまうため、
-                // ⭕️ サーバーが絶対に解決できない名前に書き換えて上書きを防ぎます
-                raw_name: `手動一括（${expense.category || "その他"}）`,
-                normalized_name: "詳細未入力の支出",
-                product_id: null,  
-                category_id: null, 
-                purchased_quantity: 1,
-                purchased_unit: "個",
-                base_quantity: null, // サーバーの比較計算から除外させるために必須
-                base_unit: null,     
-                unit_price: Number(expense.amount) || 0,
-                line_total: Number(expense.amount) || 0,
-                is_inventory_target: false // 在庫対象外を明示
-              }
-            ]
-      };
+            }));
+          }
 
-      const response = await fetch(`${kakeibo_URL}/receipts`, {  
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
+          const response = await fetch(`${kakeibo_URL}/receipts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(finalizedReceipt),
+          });
+          if (!response.ok) throw new Error(`確定登録エラー: ${response.status}`);
+        }
 
-      if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
+      } else {
+        // --- パターンB: 詳細な商品は入力せず、一括登録した場合 ---
+        // サーバーのお節介（prepare）を通さず、絶対に比較されない未知の名前で直接POSTして保存する！
+        const directBody = {
+          purchased_at: dateNum,
+          store_name: (expense.description || "手動登録店舗").trim(),
+          total_amount: Number(expense.amount) || 0,
+          items: [
+            {
+              raw_name: `手動一括（${expense.category || "その他"}）`,
+              normalized_name: "詳細未入力の支出",
+              product_id: null,  
+              category_id: null, 
+              purchased_quantity: 1,
+              purchased_unit: "個",
+              base_quantity: null, // 👈 null なのでサーバーは 100% 比較計算から除外
+              base_unit: null,     // 👈 null 固定
+              unit_price: Number(expense.amount) || 0,
+              line_total: Number(expense.amount) || 0,
+              is_inventory_target: false // 在庫対象外
+            }
+          ]
+        };
 
+        const response = await fetch(`${kakeibo_URL}/receipts`, {  
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(directBody),
+        });
+
+        if (!response.ok) throw new Error(`直接登録エラー: ${response.status}`);
+      }
+
+      // 共通の終了処理
       await fetchExpenses(); 
       alert("家計簿にデータを登録しました！");
     } catch (err) {
       console.error("手動家計簿の送信に失敗しました:", err);
-      alert("サーバーへの保存に失敗しました。");
+      alert("サーバーへの保存に失敗しました。入力値を確認してください。");
     }
   };
 
