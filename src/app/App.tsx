@@ -336,7 +336,7 @@ export default function App() {
     }
   };
     
-  const submitReceiptPayload = async (requestBody: any) => {
+const submitReceiptPayload = async (requestBody: any) => {
     try {
       if (!requestBody) return;
 
@@ -349,6 +349,112 @@ export default function App() {
           dateStr = s.split('T')[0];
         }
       }
+
+      // 1. レシート全体のカテゴリ判定（AIレシピ適応調理などの特殊ケースやデフォルト用）
+      // ※通常のOCRでは各明細（item）ごとにカテゴリが返ってくるため、明細ループ側で厳密に判定します。
+      const isFoodReceipt = requestBody.store_name !== "AIレシピ適応調理"; 
+      const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
+
+      const prepareBody = {
+        status: "needs_confirmation",
+        store_name: (requestBody.store_name || "手動在庫追加").trim(), 
+        purchased_at: dateStr, 
+        total_amount: Number(requestBody.total_amount) || 0, 
+        items: hasItems 
+          ? requestBody.items.map((item: any) => {
+              // 明細のカテゴリ名が「食費」であるか、あるいはレシート全体が食費対象か判定
+              const isFoodItem = item.category_name === "食費" || (!item.category_name && isFoodReceipt);
+              
+              return {
+                raw_name: (item.raw_name || "手動登録商品").trim(),
+                normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
+                category_name: item.category_name || "食費", 
+                purchased_quantity: Number(item.purchased_quantity) || 1,
+                purchased_unit: item.purchased_unit || "個",
+                // 【重要】食費以外、または個別商品名が曖昧な塊の場合は価格比較に入らないよう base_quantity を null に
+                base_quantity: isFoodItem ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
+                base_unit: isFoodItem ? (item.base_unit || item.purchased_unit || "個") : null,
+                unit_price: Number(item.unit_price) || 0,
+                line_total: Number(item.line_total) || 0,
+                // 【重要】食費の明細だけを在庫対象（＝価格比較対象）にする
+                is_inventory_target: isFoodItem ? (item.is_inventory_target ?? true) : false,
+                confidence: item.confidence ?? 1.0,
+                warnings: item.warnings || []
+              };
+            })
+          : [
+              // 明細が1件もない「塊」での登録の場合（価格比較から完全に除外するフォールバック）
+              {
+                raw_name: "レシート一括登録",
+                normalized_name: "未分類の支出",
+                category_name: "その他",
+                purchased_quantity: 1,
+                purchased_unit: "個",
+                base_quantity: null, // null にして価格比較を除外
+                base_unit: null,     // null にして価格比較を除外
+                unit_price: Number(requestBody.total_amount) || 0,
+                line_total: Number(requestBody.total_amount) || 0,
+                is_inventory_target: false,
+                confidence: 1.0,
+                warnings: []
+              }
+            ],
+        warnings: []
+      };
+
+      const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(prepareBody),
+      });
+
+      if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
+      const prepareData = await prepareResponse.json();
+      const finalizedReceipt = prepareData.receipt;
+
+      if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
+
+      // 2. 確定登録用のPOSTボディの組み立て（prepareBodyの除外設定を引き継ぐ）
+      if (Array.isArray(finalizedReceipt.items)) {
+        finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
+          // 送信した prepareBody の設定をそのままマッピング
+          const originalItem = prepareBody.items[idx];
+          const isTarget = originalItem ? originalItem.is_inventory_target : false;
+
+          return {
+            ...item,
+            is_inventory_target: isTarget,
+            // prepare 側で解決されて上書きされた場合も、非食費なら base_quantity を確実に null に固定して防御
+            base_quantity: isTarget ? (Number(item.base_quantity) || 1) : null,
+            base_unit: isTarget ? (item.base_unit || "個") : null,
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0
+          };
+        });
+      }
+      
+      if (typeof finalizedReceipt.purchased_at === 'string') {
+        finalizedReceipt.purchased_at = Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''));
+      }
+      finalizedReceipt.total_amount = Number(requestBody.total_amount) || 0;
+
+      const response = await fetch(`${kakeibo_URL}/receipts`, {  
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(finalizedReceipt),
+      });
+
+      if (!response.ok) {
+        throw new Error(`サーバーエラー: ${response.status}`);
+      }
+
+      await fetchExpenses(); 
+      alert("レシートデータの登録に成功しました！");
+    } catch (err) {
+      console.error("送信プロセス失敗:", err);
+      alert("サーバーへの保存に失敗しました。");
+    }
+  };
 
       const prepareBody = {
         status: "needs_confirmation",
@@ -429,16 +535,17 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         dateNum = Number(`${y}${m}${day}`);
       }
 
-      // フォーム側（AddExpenseForm）で組み立てられた明細データが存在するかチェック
-      const hasItems = expense.items && expense.items.length > 0;
+      // 1. 判定フラグの準備
+      const isFoodCategory = expense.category === "食費";
+      const hasSpecificItems = expense.items && expense.items.length > 0;
 
       const requestBody = {
         purchased_at: dateNum,
-        // API_SPEC.md の定義通り、store_name として店舗名を独立させて送信
         store_name: (expense.description || "手動登録店舗").trim(),
         total_amount: Number(expense.amount) || 0,
-        // フォーム側で構築された items があればそのまま使い、無ければ従来のフォールバック
-        items: hasItems 
+        
+        // 2. フォーム側で「商品を追加」ボタンから個別の明細が入力されている場合
+        items: hasSpecificItems 
           ? expense.items?.map((item) => ({
               raw_name: item.raw_name.trim(),
               normalized_name: item.normalized_name.trim(),
@@ -450,21 +557,27 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
               base_unit: item.base_unit || "個",
               unit_price: Number(item.unit_price) || Number(expense.amount),
               line_total: Number(item.line_total) || Number(expense.amount),
-              is_inventory_target: item.is_inventory_target ?? false
+              // 食費のときだけ在庫対象（＝価格比較の対象）にする
+              is_inventory_target: isFoodCategory ? (item.is_inventory_target ?? true) : false
             }))
+          // 3. 上部の「説明」欄だけで登録し、個別商品を追加しなかった場合
           : [
               {
+                // 個別商品がない場合は、店舗での買い物という「塊」を raw_name にする
                 raw_name: (expense.description || "手動登録商品").trim(),
-                normalized_name: (expense.category || "娯楽").trim(),
+                // API仕様書に基づき、価格比較（/prices/cheapest）の対象外にするため
+                // product_id 未解決状態、かつ normalized_name や base_unit をあえて null または空にする
+                normalized_name: isFoodCategory ? "未分類の食材" : (expense.category || "その他").trim(),
                 product_id: null,  
                 category_id: null, 
                 purchased_quantity: 1,
                 purchased_unit: "個",
-                base_quantity: 1,
-                base_unit: "個",
+                // 仕様書より：base_quantity が null の明細は最安店舗（価格比較）の対象外になります！
+                base_quantity: null, 
+                base_unit: null, 
                 unit_price: Number(expense.amount) || 0,
                 line_total: Number(expense.amount) || 0,
-                is_inventory_target: false 
+                is_inventory_target: false // 個別商品がないなら一律で在庫・比較の対象外にする
               }
             ]
       };
