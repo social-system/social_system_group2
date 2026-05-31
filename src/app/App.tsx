@@ -377,6 +377,7 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
       }
 
+      // ユーザーが明示的に個別商品リスト(items)を入力して渡してきたか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
 
       const prepareBody = {
@@ -404,8 +405,7 @@ const submitReceiptPayload = async (requestBody: any) => {
             })
           : [
               {
-                // ❌ 「買い物」を回避
-                raw_name: "レシート一括（詳細未入力）",
+                raw_name: "詳細未入力の支出（一括）",
                 normalized_name: "詳細未入力の支出",
                 category_name: "その他", 
                 purchased_quantity: 1,
@@ -434,15 +434,30 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
+      // 🚨 【超強力ガード】サーバーがprepareで勝手に補完・偽造してきたデータを、確定保存の直前で完全に破壊・リセットする
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
+          // ユーザーが個別詳細を登録していない（＝一括登録）の場合
+          if (!hasItems) {
+            return {
+              ...item,
+              raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
+              normalized_name: "詳細未入力の支出",
+              product_id: null,           // サーバーが勝手に割り当てたIDを消滅させる
+              category_id: null,
+              is_inventory_target: false, // 在庫対象から絶対に外す
+              base_quantity: null,        // 最安値比較計算から100%除外する
+              base_unit: null,            // 最安値比較計算から100%除外する
+              purchased_quantity: 1,
+              purchased_unit: "個"
+            };
+          }
+
+          // 個別詳細商品が入力されている通常ケース
           const orig = prepareBody.items[idx];
           const isTarget = orig ? orig.is_inventory_target : false;
           return {
             ...item,
-            // サーバー側でお節介な解決をされないよう強制的にnullや元の未知の名前に固定する
-            raw_name: orig ? orig.raw_name : item.raw_name,
-            normalized_name: orig ? orig.normalized_name : item.normalized_name,
             product_id: isTarget ? (item.product_id || null) : null, 
             is_inventory_target: isTarget,
             base_quantity: isTarget ? (Number(item.base_quantity) || 1) : null, 
