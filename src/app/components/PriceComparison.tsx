@@ -190,7 +190,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
             <h3 className="font-bold text-gray-800">商品別価格</h3>
           </div>
 
-          {/* 検索欄 */}
+          {/* 検索欄 
           <div className="relative mb-2">
             <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
             <input
@@ -211,14 +211,14 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
             )}
           </div>
 
-          {/* 件数 */}
+          {/* 件数 
           {searchQuery && (
             <p className="mb-2 text-xs text-gray-500">
               {priceData.length > 0
                 ? `「${searchQuery}」: ${priceData.length}件`
                 : `「${searchQuery}」に一致する食材はありません`}
             </p>
-          )}
+          )} */}
 
           {/* リスト */}
           <div className="max-h-[500px] space-y-3 overflow-y-auto">
