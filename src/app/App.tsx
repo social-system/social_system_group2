@@ -400,14 +400,17 @@ const submitReceiptPayload = async (requestBody: any) => {
         items: hasItems 
           ? requestBody.items.map((item: any) => {
               const isFood = item.category_name === "食費" || item.normalized_name === "食費" || requestBody.store_name === "手動在庫追加";
+              const q = Number(item.purchased_quantity) || 1;
+              const u = item.purchased_unit || "個";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
                 normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
                 category_name: isFood ? "食費" : (item.category_name && item.category_name.trim() !== "" ? item.category_name : "その他"), 
-                purchased_quantity: Number(item.purchased_quantity) || 1,
-                purchased_unit: item.purchased_unit || "個",
-                base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
-                base_unit: item.base_unit || item.purchased_unit || "個",
+                purchased_quantity: q,
+                purchased_unit: u,
+                // 💡 サーバーの最安値計算（0除算やnullエラー）を回避するため、あらかじめ基準数量をセット
+                base_quantity: q,
+                base_unit: u,
                 unit_price: Number(item.unit_price) || 0,
                 line_total: Number(item.line_total) || 0,
                 is_inventory_target: isFood,
@@ -422,8 +425,8 @@ const submitReceiptPayload = async (requestBody: any) => {
                 category_name: "その他", 
                 purchased_quantity: 1,
                 purchased_unit: "個",
-                base_quantity: null, 
-                base_unit: null, 
+                base_quantity: 1, 
+                base_unit: "個", 
                 unit_price: Number(requestBody.total_amount) || 0,
                 line_total: Number(requestBody.total_amount) || 0,
                 is_inventory_target: false,
@@ -446,7 +449,7 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【422 extra_forbidden ＆ invalid_receipt 完全撃退フィルター】
+      // 【422 extra_forbidden ＆ invalid_receipt 完全撃退フィルター】
       const cleansedPayload: any = {
         store_name: prepareBody.store_name, 
         purchased_at: typeof finalizedReceipt.purchased_at === 'string'
@@ -465,8 +468,8 @@ const submitReceiptPayload = async (requestBody: any) => {
               product_id: null,
               category_id: null,
               is_inventory_target: false, 
-              base_quantity: null,        
-              base_unit: null,            
+              base_quantity: 1,        
+              base_unit: "個",            
               purchased_quantity: 1,
               purchased_unit: "個",
               unit_price: Number(cleansedPayload.total_amount),
@@ -477,22 +480,24 @@ const submitReceiptPayload = async (requestBody: any) => {
           const originalItem = requestBody.items[idx] || requestBody.items[0] || {};
           const isHandledInventory = prepareBody.store_name === "手動在庫追加";
 
+          const finalQty = Number(originalItem.purchased_quantity || item.purchased_quantity) || 1;
+          const finalUnit = originalItem.purchased_unit || item.purchased_unit || "個";
+
           return {
             raw_name: (originalItem.raw_name || item.raw_name || "手動登録商品").trim(),
             normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            
-            // ✨ 【最重要修正】存在しない「1」を設定するのをやめ、安全に null にします。
-            // これによりバックエンドは名前（normalized_name）からマスタを自動解決してくれます。
             product_id: item.product_id || null, 
             category_id: item.category_id || null,
-            
             is_inventory_target: isHandledInventory ? true : (item.category_name === "食費" || item.normalized_name === "食費"),
-            purchased_quantity: Number(originalItem.purchased_quantity || item.purchased_quantity) || 1, 
-            purchased_unit: originalItem.purchased_unit || item.purchased_unit || "個",
+            purchased_quantity: finalQty, 
+            purchased_unit: finalUnit,
             unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
             line_total: Number(originalItem.line_total || item.line_total) || 0,
-            base_quantity: Number(originalItem.base_quantity || item.base_quantity || item.purchased_quantity) || 1, 
-            base_unit: originalItem.base_unit || item.base_unit || "個"
+            
+            // ✨ 【超重要修正】最安値集計ロジックが正常に作動するよう、
+            // 確定送信データ（cleansedPayload）にも必ず数値と単位を明示的にセットして送ります！
+            base_quantity: finalQty, 
+            base_unit: finalUnit
           };
         });
       }
@@ -517,6 +522,8 @@ const submitReceiptPayload = async (requestBody: any) => {
       alert("データの保存に失敗しました。バックエンドのバリデーションを確認してください。");
     }
   };
+
+
 const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
     try {
       let dateNum = 20260531;
