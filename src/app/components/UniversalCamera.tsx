@@ -212,27 +212,38 @@ const handleConfirmCall = async () => {
         throw new Error("サーバーから返ってきた receipt オブジェクトが空です。");
       }
 
-      // 🚨 【超重要・最強の水際フィルター】
-      // サーバーが確定させた最終結果を見て、「食費」以外の文具・日用品は絶対に在庫から弾く！
+// 🚨 【超重要・最強の水際フィルター】
+      // 1. サーバーの誤作動（食費以外の在庫化）を完全撃退
+      // 2. 数量や金額を確実に「数値型」に変換して422エラーを徹底防止！
       if (Array.isArray(finalReceiptPayload.items)) {
         finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => {
           const finalCategory = item.category_name || "";
           const finalNormName = item.normalized_name || "";
           
-          // 🔥 カテゴリー名または正規化名が確実に「食費」である場合のみ true にする！
-          // これにより「文具」や空(null)のデータは100% false（在庫対象外）に書き換わります。
+          // カテゴリー名または正規化名が確実に「食費」である場合のみ true にする
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
           return {
             ...item,
+            // 📝 文字列すり抜け防止ガード（空なら未分類に）
             category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
             product_id: isRealFood ? (item.product_id || null) : null,
-            is_inventory_target: isRealFood, // 👈 サーバーの誤作動や以前の一律一括指定をここで完全撃退！
+            is_inventory_target: isRealFood,
+            
+            // 🚨 【422エラー対策】すべての数値項目を強制的に「数値型(Number)」へ変換・クレンジング！
+            purchased_quantity: Number(item.purchased_quantity) || 1, 
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
+
+            // 在庫数量・単位も食費以外なら必ず null に統一
             base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
             base_unit: isRealFood ? (item.base_unit || "個") : null
           };
         });
       }
+
+      // レシート全体の合計金額も確実に数値型にする
+      finalReceiptPayload.total_amount = Number(finalReceiptPayload.total_amount) || Number(extractedData.total_amount) || 0;
 
       console.log("【2/2】/receipts（本登録）に送信する確定データ:", finalReceiptPayload);
 
