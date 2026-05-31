@@ -212,15 +212,6 @@ const handleConfirmCall = async () => {
         throw new Error("サーバーから返ってきた receipt オブジェクトが空です。");
       }
 
-      // 🚨 【422エラー完全撃破ガード】
-      // バックエンドの型・バリデーション定義（Pydantic仕様）に120%適合させる成形処理
-      const cleansedPayload: any = {
-        store_name: finalReceiptPayload.store_name || "SHOP",
-        total_amount: Number(finalReceiptPayload.total_amount) || Number(extractedData.total_amount) || 0,
-        status: finalReceiptPayload.status || "needs_confirmation",
-        warnings: finalReceiptPayload.warnings || []
-      };
-
       // ✅ 1. 日付をサーバー仕様通り「ハイフンなしの数値型(int)」に強制変換 (例: 20250501)
       let finalDateNum = 20260531;
       const rawDate = String(finalReceiptPayload.purchased_at || dateStr);
@@ -228,9 +219,18 @@ const handleConfirmCall = async () => {
       if (digitOnly.length === 8) {
         finalDateNum = Number(digitOnly);
       }
-      cleansedPayload.purchased_at = finalDateNum;
 
-      // ✅ 2. 各明細の成形：余計なキー（category_name等）を完全削除し、型をクレンジング
+      // 🚨 【422 extra_forbidden 完全撃退ガード】
+      // バックエンドが受け付ける「許可されたキー」だけでオブジェクトを1から再構築します
+      // (status や warnings は含めません)
+      const cleansedPayload: any = {
+        store_name: finalReceiptPayload.store_name || "SHOP",
+        purchased_at: finalDateNum,
+        total_amount: Number(finalReceiptPayload.total_amount) || Number(extractedData.total_amount) || 0,
+        items: []
+      };
+
+      // ✅ 2. 各明細の成形：禁止されている項目 (category_name, confidence, warnings) を完全に削ぎ落とす
       if (Array.isArray(finalReceiptPayload.items)) {
         cleansedPayload.items = finalReceiptPayload.items.map((item: any) => {
           const finalCategory = item.category_name || "";
@@ -239,35 +239,27 @@ const handleConfirmCall = async () => {
           // カテゴリー名または正規化名が確実に「食費」である場合のみ在庫連動対象(true)とする
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
-          // ⚠️ サーバーが「Extra inputs are not permitted」で怒るため、
-          // 許可された、かつ必要な項目だけを厳選して新しいオブジェクトを作成します（category_name等は含めない）
+          // ⚠️ Pydanticモデルが許可している、保存に必要なフィールドだけをホワイトリスト形式で抽出します
           return {
             raw_name: item.raw_name || "不明な商品",
             normalized_name: item.normalized_name || item.raw_name || "不明な商品",
             product_id: isRealFood ? (item.product_id || null) : null,
             category_id: item.category_id || null,
             is_inventory_target: isRealFood, // 文具や空カテゴリはここで確実に false に固定！
-            
-            // 数量・単価・小計は確実に「数値型」にキャスト
             purchased_quantity: Number(item.purchased_quantity) || 1, 
             purchased_unit: item.purchased_unit || "個",
             unit_price: Number(item.unit_price) || 0,
             line_total: Number(item.line_total) || 0,
-
             // 食費以外なら在庫数量・単位は必ず null に統一
             base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
-            base_unit: isRealFood ? (item.base_unit || "個") : null,
-            confidence: Number(item.confidence) || 1.0,
-            warnings: item.warnings || []
+            base_unit: isRealFood ? (item.base_unit || "個") : null
           };
         });
-      } else {
-        cleansedPayload.items = [];
       }
 
       console.log("【2/2】/receipts（本登録）に送信する完璧な成形データ:", cleansedPayload);
 
-      // 5. 完全にサーバーの要求通りに綺麗になった cleansedPayload を POST して保存
+      // 5. 完全に無駄なデータが削ぎ落とされた cleansedPayload を POST して保存
       const response = await fetch(`${kakeibo_URL}/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
