@@ -418,7 +418,7 @@ export default function App() {
     }
   };
 
-  const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
+const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
     try {
       let dateNum = 20260526;
       if (expense.date) {
@@ -429,25 +429,44 @@ export default function App() {
         dateNum = Number(`${y}${m}${day}`);
       }
 
+      // フォーム側（AddExpenseForm）で組み立てられた明細データが存在するかチェック
+      const hasItems = expense.items && expense.items.length > 0;
+
       const requestBody = {
         purchased_at: dateNum,
+        // API_SPEC.md の定義通り、store_name として店舗名を独立させて送信
         store_name: (expense.description || "手動登録店舗").trim(),
         total_amount: Number(expense.amount) || 0,
-        items: [
-          {
-            raw_name: (expense.description || "手動登録商品").trim(),
-            normalized_name: (expense.category || "娯楽").trim(),
-            product_id: null,  
-            category_id: null, 
-            purchased_quantity: 1,
-            purchased_unit: "個",
-            base_quantity: 1,
-            base_unit: "個",
-            unit_price: Number(expense.amount) || 0,
-            line_total: Number(expense.amount) || 0,
-            is_inventory_target: false 
-          }
-        ]
+        // フォーム側で構築された items があればそのまま使い、無ければ従来のフォールバック
+        items: hasItems 
+          ? expense.items?.map((item) => ({
+              raw_name: item.raw_name.trim(),
+              normalized_name: item.normalized_name.trim(),
+              product_id: item.product_id || null,  
+              category_id: item.category_id || null, 
+              purchased_quantity: Number(item.purchased_quantity) || 1,
+              purchased_unit: item.purchased_unit || "個",
+              base_quantity: Number(item.base_quantity) || 1,
+              base_unit: item.base_unit || "個",
+              unit_price: Number(item.unit_price) || Number(expense.amount),
+              line_total: Number(item.line_total) || Number(expense.amount),
+              is_inventory_target: item.is_inventory_target ?? false
+            }))
+          : [
+              {
+                raw_name: (expense.description || "手動登録商品").trim(),
+                normalized_name: (expense.category || "娯楽").trim(),
+                product_id: null,  
+                category_id: null, 
+                purchased_quantity: 1,
+                purchased_unit: "個",
+                base_quantity: 1,
+                base_unit: "個",
+                unit_price: Number(expense.amount) || 0,
+                line_total: Number(expense.amount) || 0,
+                is_inventory_target: false 
+              }
+            ]
       };
 
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
@@ -515,21 +534,27 @@ export default function App() {
 
 const deleteInventoryItemCall = async (id: string) => {
     try {
-      // 1. まず、渡ってきた ID から不要なプレフィックスを取り除く
-      let cleanId = id.replace("receipt-", "");
-
-      // 2. 【超重要】もしIDの中にハイフンが含まれている場合（例: "20-test" や "20-26" のような複合キー）
-      // または、何らかの理由で明細IDが渡ってきている可能性があるため、
-      // 現在表示されている inventory 状態から、該当する正しい商品ID（product_id）を逆引きします。
-      const foundItem = inventory.find(item => item.id === id);
+      // 1. 引数の id は product_id (文字列) になっているので、数値に変換
+      const targetProductId = Number(id.replace("receipt-", ""));
       
-      // 逆引きできたらそれ（本来のproduct_id）を使い、できなければ cleanId をそのまま使う
-      const productIdToDelete = foundItem ? foundItem.id : cleanId;
+      // 2. 家計簿データ（expenses）の全明細の中から、この product_id を持っているレシートを検索する
+      const parentExpense = expenses.find(exp => 
+        exp.items?.some(item => Number(item.product_id) === targetProductId)
+      );
 
-      console.log(`削除要求されたフロントID: ${id} -> 送信する商品ID(product_id): ${productIdToDelete}`);
+      // 3. もし家計簿から見つかればそのIDを使用。
+      // 見つからない場合は、手動在庫追加などの特殊データである可能性を考慮して id をそのまま使用
+      const receiptIdToDelete = parentExpense ? parentExpense.id : id;
 
-      // 3. 正しい商品IDを指定して在庫残高削除（消費）APIを叩く（例: .../inventory/balances/18）
-      const response = await fetch(`${kakeibo_URL}/inventory/balances/${productIdToDelete}`, {
+      console.log(`削除要求された商品ID: ${id} -> 特定した大元レシートID: ${receiptIdToDelete}`);
+
+      if (!receiptIdToDelete || String(receiptIdToDelete).includes("undefined")) {
+        alert("有効なレシートIDが見つからないため、削除処理を中断しました。");
+        return;
+      }
+
+      // 4. 仕様書「DELETE /receipts/{receipt_id}」に従い、大元の家計簿・在庫データを一撃で削除
+      const response = await fetch(`${kakeibo_URL}/receipts/${receiptIdToDelete}`, {
         method: "DELETE",
       });
 
@@ -538,14 +563,14 @@ const deleteInventoryItemCall = async (id: string) => {
         throw new Error(`サーバーエラー: ${response.status} - ${errorText}`);
       }
 
-      // 4. 成功したら画面を更新
+      // 5. 削除に成功したら画面と状態を最新に同期
       await fetchExpenses();            
       await fetchInventoryBalances();   
 
-      alert("在庫を削除しました！");
+      alert("在庫データを削除（消費）しました！");
     } catch (err) {
       console.error("在庫の消費・削除に失敗しました:", err);
-      alert(`在庫の削除に失敗しました:\n${err instanceof Error ? err.message : "通信エラー"}`);
+      alert("サーバーの在庫更新に失敗しました。");
     }
   };
 
