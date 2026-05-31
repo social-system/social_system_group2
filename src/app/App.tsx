@@ -853,69 +853,111 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
       let cheapestStoreTotal = 0;
       let fallbackTotal = 0; 
 
-      // 2. 不足している材料ごとに、過去の家計簿履歴からproduct_idを自動検索して最安値を計算
-      await Promise.all(
-        missingIngredients.map(async (ing) => {
-          const neededQty = parseFloat(ing.amount) || 1.00;
-          
-          // AIから最初からproductIdが渡されているかチェック
-          let pId = ing.productId && ing.productId > 0 ? ing.productId : null;
-          
-          // 💡 【自動品名マッチングロジック】
-          // AIからproductIdが来ていない場合、過去の家計簿履歴（expenses）の全明細アイテムを探索。
-          // 材料名（例:「キャベツ」）が含まれる有効な product_id をリアルタイムに自動特定します。
-          if (!pId && Array.isArray(expenses)) {
-            for (const exp of expenses) {
-              if (exp.items && Array.isArray(exp.items)) {
-                const matchedItem = exp.items.find((item: any) => {
-                  if (!item || !item.product_id) return false;
-                  const name = item.normalized_name || item.raw_name || "";
-                  // 「キャベツ」などの文字が家計簿の品名とお互いに含まれ合っているか部分一致で判定
-                  return ing.name.includes(name) || name.includes(ing.name);
-                });
-                
-                if (matchedItem && matchedItem.product_id) {
-                  pId = Number(matchedItem.product_id);
-                  break; // IDが見つかったら探索を終了
-                }
+      // 2. 不足している材料ごとに最安値を計算
+      for (const ing of missingIngredients) {
+        const neededQty = parseFloat(ing.amount) || 1.00;
+        
+        // AIから最初からproductIdが渡されているかチェック
+        let pId = ing.productId && ing.productId > 0 ? ing.productId : null;
+        
+        // 💡 【自動品名マッチングロジック】(anyキャストで型エラーを完全回避)
+        if (!pId && Array.isArray(expenses)) {
+          for (const exp of expenses) {
+            const anyExp = exp as any; // ✨ Expense型をanyにキャスト
+            if (anyExp && anyExp.items && Array.isArray(anyExp.items)) {
+              const matchedItem = anyExp.items.find((item: any) => {
+                if (!item || !item.product_id) return false;
+                const name = String(item.normalized_name || item.raw_name || ""); // ✨ 明示的にstring化
+                return String(ing.name).includes(name) || name.includes(String(ing.name));
+              });
+              
+              if (matchedItem && matchedItem.product_id) {
+                pId = Number(matchedItem.product_id);
+                break; 
               }
             }
-            if (pId) {
-              console.log(`【品名から家計簿逆引き成功】「${ing.name}」の過去の登録履歴から商品ID:${pId}を特定しました。`);
-            }
           }
-
-          // 商品IDが特定できた（または元からあった）場合は最安値APIへリクエスト
           if (pId) {
-            try {
-              const response = await fetch(
-                `${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`
-              );
-              
-              if (response.ok) {
-                const data = await response.json();
-                if (data && data.cheapest) {
-                  const cheapestInfo = data.cheapest;
-                  const unitPrice = parseFloat(cheapestInfo.price_per_base_unit) || 0;
-                  const costForThisIngredient = unitPrice * neededQty;
+            console.log(`【品名から家計簿逆引き成功】「${ing.name}」の過去の登録履歴から商品ID:${pId}を特定しました。`);
+          }
+        }
 
-                  cheapestStoreName = cheapestInfo.store_name; 
+        let foundValidCheapest = false;
+
+        // 商品IDが特定できた場合は最安値APIへリクエスト
+        if (pId) {
+          try {
+            const response = await fetch(
+              `${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`
+            );
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data && data.cheapest) {
+                const cheapestInfo = data.cheapest;
+                const unitPrice = parseFloat(cheapestInfo.price_per_base_unit) || 0;
+                
+                if (unitPrice > 0) {
+                  const costForThisIngredient = unitPrice * neededQty;
+                  cheapestStoreName = cheapestInfo.store_name || "";
                   cheapestStoreTotal += costForThisIngredient;
                   fallbackTotal += costForThisIngredient; 
-                  return;
+                  foundValidCheapest = true;
                 }
               }
-            } catch (e) {
-              console.warn(`商品ID:${pId} (${ing.name}) の最安値取得に失敗`, e);
+            }
+          } catch (e) {
+            console.warn(`商品ID:${pId} (${ing.name}) の最安値取得に失敗`, e);
+          }
+        }
+
+        // 🚨 【フロント救済フィルター】(anyキャストで store_name などのエラーを完全消去)
+        if (!foundValidCheapest) {
+          console.log(`【フロント救済発動】${ing.name} の最安値を家計簿履歴からダイレクトに探索します。`);
+          
+          let localCheapestPrice = Infinity;
+          let localCheapestStore = "";
+
+          if (Array.isArray(expenses)) {
+            for (const exp of expenses) {
+              const anyExp = exp as any; // ✨ ここでもanyにキャストしてチェックを突破
+              if (anyExp && Array.isArray(anyExp.items)) {
+                for (const item of anyExp.items) {
+                  if (item) {
+                    const name = String(item.normalized_name || item.raw_name || "");
+                    const ingName = String(ing.name);
+                    
+                    // 名前の安全なマッチングチェック
+                    if (ingName.includes(name) || name.includes(ingName)) {
+                      const total = parseFloat(item.line_total) || 0;
+                      const qty = parseFloat(item.purchased_quantity) || 1;
+                      const unitPrice = total / (qty > 0 ? qty : 1);
+
+                      if (unitPrice > 0 && unitPrice < localCheapestPrice) {
+                        localCheapestPrice = unitPrice;
+                        localCheapestStore = anyExp.store_name || ""; // ✨ store_nameエラーを回避！
+                      }
+                    }
+                  }
+                }
+              }
             }
           }
 
-          // データベースに存在しない（過去に一度も詳細登録したことがない）新規食材などの目安価格
-          fallbackTotal += 300;
-        })
-      );
+          // 自力で見つかった場合
+          if (localCheapestStore && localCheapestPrice !== Infinity) {
+            const costForThisIngredient = localCheapestPrice * neededQty;
+            cheapestStoreName = localCheapestStore;
+            cheapestStoreTotal += costForThisIngredient;
+            fallbackTotal += costForThisIngredient;
+            console.log(`【救済成功】過去の履歴から ${cheapestStoreName} の単価 ${localCheapestPrice}円 を採用しました。`);
+          } else {
+            fallbackTotal += 300;
+          }
+        }
+      }
 
-      // 3. 計算結果の組み立て（最安値店舗1位のみを1行でバシッと表示）
+      // 3. 計算結果の組み立て
       const finalCheapestStore = cheapestStoreName || "周辺スーパー";
       const finalBasePrice = Math.round(cheapestStoreTotal > 0 ? cheapestStoreTotal : fallbackTotal);
 
