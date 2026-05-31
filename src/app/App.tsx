@@ -350,7 +350,6 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
       }
 
-      // 塊としての登録か、それとも個別の詳細商品があるか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
 
       const prepareBody = {
@@ -367,7 +366,6 @@ const submitReceiptPayload = async (requestBody: any) => {
                 category_name: item.category_name || "食費", 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
-                // 【ガード】詳細商品であっても食費以外なら null にして比較除外
                 base_quantity: isFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
                 base_unit: isFood ? (item.base_unit || item.purchased_unit || "個") : null,
                 unit_price: Number(item.unit_price) || 0,
@@ -379,12 +377,12 @@ const submitReceiptPayload = async (requestBody: any) => {
             })
           : [
               {
-                raw_name: (requestBody.store_name || "買い物").trim(),
-                normalized_name: "未分類の支出（比較対象外）",
+                // ❌ 「買い物」を回避
+                raw_name: "レシート一括（詳細未入力）",
+                normalized_name: "詳細未入力の支出",
                 category_name: "その他", 
                 purchased_quantity: 1,
                 purchased_unit: "個",
-                // 【重要】詳細な商品が無い「塊」の場合は絶対に比較に入らないよう null 固定
                 base_quantity: null, 
                 base_unit: null, 
                 unit_price: Number(requestBody.total_amount) || 0,
@@ -409,17 +407,19 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 最終登録用の調整（サーバーが勝手に product_id や base_quantity を補完するのを上書きして防ぐ）
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
           const orig = prepareBody.items[idx];
           const isTarget = orig ? orig.is_inventory_target : false;
           return {
             ...item,
-            product_id: isTarget ? (item.product_id || null) : null, // 不要なID解決を防ぐ
+            // サーバー側でお節介な解決をされないよう強制的にnullや元の未知の名前に固定する
+            raw_name: orig ? orig.raw_name : item.raw_name,
+            normalized_name: orig ? orig.normalized_name : item.normalized_name,
+            product_id: isTarget ? (item.product_id || null) : null, 
             is_inventory_target: isTarget,
-            base_quantity: isTarget ? (Number(item.base_quantity) || 1) : null, // nullを強制固定
-            base_unit: isTarget ? (item.base_unit || "個") : null // nullを強制固定
+            base_quantity: isTarget ? (Number(item.base_quantity) || 1) : null, 
+            base_unit: isTarget ? (item.base_unit || "個") : null 
           };
         });
       }
@@ -459,6 +459,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       const requestBody = {
         purchased_at: dateNum,
+        // 画面の支出一覧に表示される店舗名はユーザーの入力通りにする
         store_name: (expense.description || "手動登録店舗").trim(),
         total_amount: Number(expense.amount) || 0,
         items: harmsSpecificItems 
@@ -477,17 +478,19 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
             }))
           : [
               {
-                raw_name: (expense.description || "買い物").trim(),
-                normalized_name: "一括登録支出（比較対象外）",
-                product_id: null,  // サーバーに自動解決させないため null 固定
+                // ❌ 「買い物」という名前を使うとサーバーがID:20に自動解決してしまうため、
+                // ⭕️ サーバーが絶対に解決できない名前に書き換えて上書きを防ぎます
+                raw_name: `手動一括（${expense.category || "その他"}）`,
+                normalized_name: "詳細未入力の支出",
+                product_id: null,  
                 category_id: null, 
                 purchased_quantity: 1,
                 purchased_unit: "個",
-                base_quantity: null, // 最安比較 API の対象外にするため絶対 null 固定
-                base_unit: null,     // 絶対 null 固定
+                base_quantity: null, // サーバーの比較計算から除外させるために必須
+                base_unit: null,     
                 unit_price: Number(expense.amount) || 0,
                 line_total: Number(expense.amount) || 0,
-                is_inventory_target: false 
+                is_inventory_target: false // 在庫対象外を明示
               }
             ]
       };
@@ -504,7 +507,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       alert("家計簿にデータを登録しました！");
     } catch (err) {
       console.error("手動家計簿の送信に失敗しました:", err);
-      alert("サーバーへの保存に失敗しました。入力値を確認してください。");
+      alert("サーバーへの保存に失敗しました。");
     }
   };
 
