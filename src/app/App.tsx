@@ -503,8 +503,12 @@ const submitReceiptPayload = async (requestBody: any) => {
             normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
             product_id: item.product_id || null, 
             category_id: item.category_id || null,
-            is_inventory_target: originalItem.category_name === "食費" || item.category_name === "食費" || item.normalized_name === "食費",
-            purchased_quantity: finalQty, 
+            is_inventory_target: 
+  originalItem.is_inventory_target === true || // 元のデータが最初から在庫対象なら維持
+  originalItem.category_name === "食費" || 
+  item.category_name === "食費" || 
+  item.normalized_name === "食費" ||
+  finalStoreName.includes("手動在庫追加"), // 手動在庫追加ルートなら強制的にtruepurchased_quantity: finalQty, 
             purchased_unit: finalUnit,
             unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
             line_total: Number(originalItem.line_total || item.line_total) || 0,
@@ -833,163 +837,92 @@ const deleteInventoryItemCall = async (id: string) => {
 const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
     if (isFetchingPrices) return;
     setIsFetchingPrices(true);
-    setShopPrices([]); 
+    setShopPrices([]); // 既存の価格表示用ステートをクリア
 
     try {
       // 1. 冷蔵庫にない「要購入」の材料をすべて抽出
-      const missingIngredients = recipe.ingredients.filter(
-        ing => !ing.isInFridge
-      );
+      const missingIngredients = recipe.ingredients.filter(ing => !ing.isInFridge);
 
       if (missingIngredients.length === 0) {
-        setShopPrices([
-          { shopName: "すべての材料が冷蔵庫に揃っています！", totalPrice: 0 }
-        ]);
+        // すべて揃っている場合
+        setShopPrices([{ shopName: "すべての材料が冷蔵庫に揃っています！", totalPrice: 0, deliveryFee: 0 }]);
         setIsFetchingPrices(false);
         return;
       }
 
-      let cheapestStoreName = "";
-      let cheapestStoreTotal = 0;
-      let fallbackTotal = 0; 
+      // 店舗ごとに「合計金額」と「一致した材料名」を管理するマップ
+      const storeMap = new Map<string, { total: number; items: string[] }>();
 
-      // 2. 不足している材料ごとに最安値を計算
+      // 不足している材料ごとに過去の購入履歴をループで探索
       for (const ing of missingIngredients) {
         const neededQty = parseFloat(ing.amount) || 1.00;
-        
-        // AIから最初からproductIdが渡されているかチェック
-        let pId = ing.productId && ing.productId > 0 ? ing.productId : null;
-        
-        // 💡 【自動品名マッチングロジック】
-        if (!pId && Array.isArray(expenses)) {
+        let localCheapestPrice = Infinity;
+        let localCheapestStore = "";
+
+        // 家計簿履歴から一番安く売っていた店舗を特定
+        if (Array.isArray(expenses)) {
           for (const exp of expenses) {
-            const anyExp = exp as any; 
-            if (anyExp && anyExp.items && Array.isArray(anyExp.items)) {
-              const matchedItem = anyExp.items.find((item: any) => {
-                if (!item || !item.product_id) return false;
-                const name = String(item.normalized_name || item.raw_name || ""); 
-                return String(ing.name).includes(name) || name.includes(String(ing.name));
-              });
-              
-              if (matchedItem && matchedItem.product_id) {
-                pId = Number(matchedItem.product_id);
-                break; 
-              }
-            }
-          }
-          if (pId) {
-            console.log(`【品名から家計簿逆引き成功】「${ing.name}」の過去の登録履歴から商品ID:${pId}を特定しました。`);
-          }
-        }
+            if (exp && Array.isArray(exp.items)) {
+              for (const item of exp.items) {
+                if (item) {
+                  const name = String(item.normalized_name || item.raw_name || "");
+                  const ingName = String(ing.name);
+                  const storeName = String(exp.description || "").replace("【手動】", "").trim();
 
-        let foundValidCheapest = false;
+                  // 品名の部分一致をチェック
+                  if (ingName.includes(name) || name.includes(ingName)) {
+                    // 💡 item.line_total や item.purchased_quantity が既に number 型の場合を考慮し、Number() で安全に数値化
+                    const total = Number(item.line_total) || 0;
+                    const qty = Number(item.purchased_quantity) || 1; // 👈 parseFloat を外し、型衝突を解消
+                    const unitPrice = total / (qty > 0 ? qty : 1);
 
-        // 商品IDが特定できた場合は最安値APIへリクエスト
-        if (pId) {
-          try {
-            const response = await fetch(
-              `${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`
-            );
-            
-            if (response.ok) {
-              const data = await response.json();
-              if (data && data.cheapest) {
-                const cheapestInfo = data.cheapest;
-                const unitPrice = parseFloat(cheapestInfo.price_per_base_unit) || 0;
-                
-                if (unitPrice > 0) {
-                  const costForThisIngredient = unitPrice * neededQty;
-                  cheapestStoreName = cheapestInfo.store_name || "";
-                  cheapestStoreTotal += costForThisIngredient;
-                  fallbackTotal += costForThisIngredient; 
-                  foundValidCheapest = true;
-                }
-              }
-            }
-          } catch (e) {
-            console.warn(`商品ID:${pId} (${ing.name}) の最安値取得に失敗`, e);
-          }
-        }
-
-        // 🚨 【フロント救済フィルター：超強化確定版】
-        // バックエンドが価格を返さなかった（手動データだった）場合、ここでキャッチします
-        if (!foundValidCheapest) {
-          console.log(`【フロント救済発動】${ing.name} (商品ID: ${pId || "未特定"}) の最安値を家計簿履歴からダイレクトに探索します。`);
-          
-          let localCheapestPrice = Infinity;
-          let localCheapestStore = "";
-
-          if (Array.isArray(expenses)) {
-            for (const exp of expenses) {
-              const anyExp = exp as any; 
-              if (anyExp && Array.isArray(anyExp.items)) {
-                for (const item of anyExp.items) {
-                  if (item) {
-                    const name = String(item.normalized_name || item.raw_name || "");
-                    const ingName = String(ing.name);
-                    // App.tsxの仕様上、店名は expense.description に格納されています
-                    const storeName = String(anyExp.description || ""); 
-
-                    // ✨【超強力3大マッチング条件】どれか1つでもヒットすれば救済
-                    // 条件1: レシピの品名と家計簿の明細名が部分一致（レシートデータ用）
-                    const isNameMatch = ingName.includes(name) || name.includes(ingName);
-                    
-                    // 条件2: 事前に逆引きに成功したIDと、明細のIDが一致している（詳細手入力用）
-                    const isIdMatch = pId !== null && item.product_id !== null && Number(item.product_id) === pId;
-                    
-                    // 条件3: 品名は「手動追加食材」というダミー文字列だが、店名に「スーパーテスト」が含まれている（一括登録救済用）
-                    const isTestStoreMatch = name === "手動追加食材" && storeName.includes("スーパーテスト");
-
-                    if (isNameMatch || isIdMatch || isTestStoreMatch) {
-                      const total = parseFloat(item.line_total) || 0;
-                      const qty = parseFloat(item.purchased_quantity) || 1;
-                      const unitPrice = total / (qty > 0 ? qty : 1);
-
-                      if (unitPrice > 0 && unitPrice < localCheapestPrice) {
-                        localCheapestPrice = unitPrice;
-                        // 画面表示用に「【手動】」の文字があれば見やすく消去、なければそのまま採用
-                        localCheapestStore = storeName.replace("【手動】", ""); 
-                      }
+                    if (unitPrice > 0 && unitPrice < localCheapestPrice) {
+                      localCheapestPrice = unitPrice;
+                      localCheapestStore = storeName;
                     }
                   }
                 }
               }
             }
           }
+        }
 
-          // 自力で見つかった場合
-          if (localCheapestStore && localCheapestPrice !== Infinity) {
-            const costForThisIngredient = localCheapestPrice * neededQty;
-            cheapestStoreName = localCheapestStore;
-            cheapestStoreTotal += costForThisIngredient;
-            fallbackTotal += costForThisIngredient;
-            console.log(`【救済成功】「${cheapestStoreName}」から単価 ${localCheapestPrice}円 を採用しました！`);
-          } else {
-            console.log(`【救済失敗】「${ing.name}」に該当する過去データがありません。目安価格にします。`);
-            fallbackTotal += 300;
+        // 過去の購入データがある場合のみ計算対象にする（適当なダミー価格は足さない）
+        if (localCheapestStore && localCheapestPrice !== Infinity) {
+          const cost = localCheapestPrice * neededQty;
+          
+          if (!storeMap.has(localCheapestStore)) {
+            storeMap.set(localCheapestStore, { total: 0, items: [] });
           }
+          
+          const storeData = storeMap.get(localCheapestStore)!;
+          storeData.total += cost;
+          storeData.items.push(ing.name);
         }
       }
 
-      // 3. 計算結果の組み立て
-      const finalCheapestStore = cheapestStoreName || "周辺スーパー";
-      const finalBasePrice = Math.round(cheapestStoreTotal > 0 ? cheapestStoreTotal : fallbackTotal);
+      if (storeMap.size === 0) {
+        setShopPrices([{ shopName: "過去の購入データがないため、おすすめ店舗を算出できませんでした", totalPrice: -1, deliveryFee: 0 }]);
+        setIsFetchingPrices(false);
+        return;
+      }
 
-      const singleCheapestEstimate: ShopPriceEstimate[] = [
-        { 
-          shopName: cheapestStoreName ? `${finalCheapestStore} (過去最安値店)` : `${finalCheapestStore} (周辺目安価格)`, 
-          totalPrice: finalBasePrice,
-          deliveryFee: 0
-        }
-      ];
+      // 裏側で合計金額が「安い順」に並び替えて、上位2店舗を抽出
+      const sortedStores = Array.from(storeMap.entries())
+        .map(([storeName, data]) => ({
+          shopName: storeName,
+          totalPrice: Math.round(data.total), // 型定義通り、純粋な数値(number)として保持
+          deliveryFee: 0, 
+          matchedItems: data.items // 新しく追加したマッチ材料リスト
+        }))
+        .sort((a, b) => a.totalPrice - b.totalPrice);
 
-      setShopPrices(singleCheapestEstimate);
+      // 画面表示用のステートにセット（matchedItemsを許容させるため as any で型安全にキャスト）
+      setShopPrices(sortedStores as any);
 
     } catch (err) {
-      console.error("価格シミュレーション全体でエラーが発生しました:", err);
-      setShopPrices([
-        { shopName: "周辺スーパー (目安価格)", totalPrice: 450 }
-      ]);
+      console.error("シミュレーションエラー:", err);
+      setShopPrices([{ shopName: "おすすめ店舗の取得に失敗しました", totalPrice: -1, deliveryFee: 0 }]);
     } finally {
       setIsFetchingPrices(false);
     }
@@ -1126,10 +1059,10 @@ const handleFinalAdd = async (recipe: Recipe) => {
                 </button>
               </div>
 
-              <ExpenseList 
-                expenses={expenses.filter(e => e.description !== "手動在庫追加")} 
-                onDelete={deleteExpenseCall} 
-              />
+<ExpenseList 
+  expenses={expenses.filter(e => !e.description.includes("手動在庫追加"))} 
+  onDelete={deleteExpenseCall} 
+/>
             </div>
 
             <div className="sticky top-4 max-h-[calc(100vh-6rem)] space-y-4 overflow-y-auto">
@@ -1306,21 +1239,55 @@ const handleFinalAdd = async (recipe: Recipe) => {
               </ul>
             </div>
 
-            {shopPrices.length > 0 && (
-              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200">
-                <h4 className="font-bold text-amber-900 mb-2 flex items-center gap-1.5 text-sm">
-                  <Store className="size-4" /> 店ごとの不足材料の合計価格
+{shopPrices.length > 0 && (
+              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200">
+                <h4 className="font-bold text-gray-700 mb-3 flex items-center gap-1.5 text-sm">
+                  <Store className="size-4 text-orange-500" /> 🛒 不足材料の購入おすすめ店舗
                 </h4>
-                <div className="space-y-2">
-                  {shopPrices.map((shop, idx) => (
-                    <div key={idx} className="flex justify-between items-center bg-white p-2.5 rounded-lg shadow-sm border border-amber-100 text-sm">
-                      <span className="font-medium text-gray-700">{shop.shopName}</span>
-                      <span className="font-bold text-orange-600 text-base">
-                        ¥{shop.totalPrice.toLocaleString()}
-                        {shop.deliveryFee && <span className="text-xs text-gray-400 font-normal ml-1">(送料込)</span>}
-                      </span>
+                <div className="space-y-3">
+                  {/* エラーや、材料がすでに揃っている場合のメッセージ表示 */}
+                  {Number(shopPrices[0].totalPrice) === -1 || Number(shopPrices[0].totalPrice) === 0 ? (
+                    <div className="bg-white p-3 rounded-lg shadow-sm text-sm text-gray-500 text-center border">
+                      {shopPrices[0].shopName}
                     </div>
-                  ))}
+                  ) : (
+                    // 金額表示(¥)を一切排除し、おすすめ店舗をランキング形式で表示
+                    shopPrices.slice(0, 2).map((shop: any, idx: number) => (
+                      <div 
+                        key={idx} 
+                        className={`p-3.5 rounded-xl shadow-sm border transition-all ${
+                          idx === 0 
+                            ? 'bg-white border-orange-300 ring-2 ring-orange-500/10' 
+                            : 'bg-white/60 border-gray-200'
+                        }`}
+                      >
+                        <div className="flex justify-between items-center text-sm mb-2">
+                          <div className="flex items-center gap-2">
+                            {idx === 0 ? (
+                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥇 一番おすすめ</span>
+                            ) : (
+                              <span className="bg-gray-400 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥈 第2候補</span>
+                            )}
+                            <span className="font-bold text-gray-800 text-base">{shop.shopName}</span>
+                          </div>
+                        </div>
+                        
+                        {/* このお店で購入できる材料を安全にバッジで表示 */}
+                        {shop.matchedItems && Array.isArray(shop.matchedItems) && shop.matchedItems.length > 0 && (
+                          <div className="text-xs text-gray-500">
+                            <p className="mb-1 text-gray-500 font-medium">このお店で購入できる材料:</p>
+                            <div className="flex flex-wrap gap-1">
+                              {shop.matchedItems.map((itemName: string, itemIdx: number) => (
+                                <span key={itemIdx} className="bg-gray-100 border border-gray-200 px-2 py-0.5 rounded text-[11px] text-gray-700 font-medium">
+                                  {itemName}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))
+                  )}
                 </div>
               </div>
             )}
