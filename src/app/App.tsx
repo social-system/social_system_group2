@@ -389,7 +389,7 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
       }
 
-      // ユーザーが個別商品リスト(items)を入力、または手動在庫から渡してきたか判定
+      // ユーザーが個別商品リスト(items)を入力、または手動在庫から渡ってきたか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
 
       const prepareBody = {
@@ -399,12 +399,11 @@ const submitReceiptPayload = async (requestBody: any) => {
         total_amount: Number(requestBody.total_amount) || 0, 
         items: hasItems 
           ? requestBody.items.map((item: any) => {
-              // 「食費」または手動在庫追加の場合は在庫対象にする
               const isFood = item.category_name === "食費" || item.normalized_name === "食費" || requestBody.store_name === "手動在庫追加";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
                 normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-                category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
+                category_name: isFood ? "食費" : (item.category_name && item.category_name.trim() !== "" ? item.category_name : "その他"), 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
                 base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
@@ -447,9 +446,9 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【422 extra_forbidden 完全撃退フィルター】
+      // 🚨 【422 extra_forbidden ＆ invalid_receipt 完全撃退フィルター】
       const cleansedPayload: any = {
-        store_name: prepareBody.store_name, // 補完で勝手に上書きされないよう元の店名を維持
+        store_name: prepareBody.store_name, 
         purchased_at: typeof finalizedReceipt.purchased_at === 'string'
           ? Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''))
           : Number(finalizedReceipt.purchased_at) || 20260531,
@@ -459,7 +458,6 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (Array.isArray(finalizedReceipt.items)) {
         cleansedPayload.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          // 1. 完全に「詳細明細がない」一括登録の場合のみ、ダミー明細にする
           if (!hasItems) {
             return {
               raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
@@ -476,16 +474,18 @@ const submitReceiptPayload = async (requestBody: any) => {
             };
           }
 
-          // 2. 通常の詳細入力、または手動在庫追加の場合
-          // requestBody.items から元の名前や数量などの設定をサルベージする
           const originalItem = requestBody.items[idx] || requestBody.items[0] || {};
           const isHandledInventory = prepareBody.store_name === "手動在庫追加";
 
           return {
             raw_name: (originalItem.raw_name || item.raw_name || "手動登録商品").trim(),
             normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            product_id: isHandledInventory ? 1 : (item.product_id || null), // 手動在庫追加の時は仕様に合わせる
-            category_id: isHandledInventory ? 1 : (item.category_id || null),
+            
+            // ✨ 【最重要修正】存在しない「1」を設定するのをやめ、安全に null にします。
+            // これによりバックエンドは名前（normalized_name）からマスタを自動解決してくれます。
+            product_id: item.product_id || null, 
+            category_id: item.category_id || null,
+            
             is_inventory_target: isHandledInventory ? true : (item.category_name === "食費" || item.normalized_name === "食費"),
             purchased_quantity: Number(originalItem.purchased_quantity || item.purchased_quantity) || 1, 
             purchased_unit: originalItem.purchased_unit || item.purchased_unit || "個",
@@ -499,7 +499,6 @@ const submitReceiptPayload = async (requestBody: any) => {
       
       console.log("【本登録直前】余計なキーをすべて排除したデータ:", cleansedPayload);
 
-      // 完全に綺麗になった cleansedPayload を送る
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
