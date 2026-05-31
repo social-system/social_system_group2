@@ -26,6 +26,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
   const [searchQuery, setSearchQuery] = useState('');
 
   // 商品別に価格データを集計
+// 商品別に価格データを集計
   const analyzePrices = (): ItemPriceData[] => {
     if (!expenses || !Array.isArray(expenses)) return [];
     const itemMap = new Map<string, ItemPriceData>();
@@ -34,38 +35,53 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
       // items 配列がない、または空の場合はスキップ
       if (!expense.items || !Array.isArray(expense.items) || expense.items.length === 0) return;
 
-      // 手動在庫追加などのシステムダミーデータ、または店舗名が割り出せない説明文はスキップ
-      if (expense.description === "手動在庫追加" || expense.description === "手動登録商品") return;
+      const rawDescription = String(expense.description || "").trim();
+
+      // 💡【修正ガード1】店舗名に「手動在庫追加」や「手動登録商品」が含まれるレシートは完全にスキップ
+      if (
+        rawDescription.includes("手動在庫追加") || 
+        rawDescription.includes("手動登録商品")
+      ) {
+        return;
+      }
 
       // 説明欄（description）に「〜での買い物」や店舗名が入っているため、それを店舗名として利用
-      // もし空なら「一般的な店舗」とする
       const detectedStoreName = expense.description 
-        ? expense.description.replace('での買い物', '').trim() 
+        ? expense.description.replace('での買い物', '').replace('【手動】', '').trim() 
         : '不明な店舗';
 
+      // 💡【追加ガード】整形後の店名が「手動在庫追加」になってしまった場合もスキップ
+      if (detectedStoreName === "手動在庫追加") {
+        return;
+      }
+
       expense.items.forEach((item) => {
-        // App.tsx の仕様に合わせて item.raw_name を取得
         const name = item.raw_name || '不明な食材';
         
-        // 🚨 【価格比較ガード】「手動一括」や「詳細未入力」などのダミー明細は集計から完全に除外する
+        // 【価格比較ガード】ダミー明細は集計から完全に除外する
         if (
           name.includes("手動一括") || 
           name.includes("詳細未入力") || 
           name.includes("買い物") ||
           name === "a"
         ) {
-          return; // 該当した場合はこの明細をスキップ
+          return; 
         }
 
         const itemNameLower = name.toLowerCase();
         
-        // 数量・単位・合計金額の取得 (App.tsx のプロパティ名に完全準拠)
+        // 数量・単位・合計金額の取得
         const quantity = item.purchased_quantity || 1;
         const unit = item.purchased_unit || '個';
         const totalPrice = item.line_total || expense.amount || 0;
         
-        // 1つあたりの単価を計算 (item.unit_price があれば最優先、なければ計算)
+        // 1つあたりの単価を計算
         const unitPrice = item.unit_price || (totalPrice / quantity);
+
+        // 💡【修正ガード2】単価が0円以下のデータ（手動登録による0円など）は価格比較に含めずスキップ
+        if (unitPrice <= 0) {
+          return;
+        }
 
         if (!itemMap.has(itemNameLower)) {
           itemMap.set(itemNameLower, {
@@ -97,7 +113,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
     return Array.from(itemMap.values()).sort((a, b) => a.itemName.localeCompare(b.itemName));
   };
 
-  // 店舗別のおすすめ度を計算
+  // 店舗別のおすすめ度を計算 (最安値の品目数が多い順に並び替え)
   const getStoreRecommendations = () => {
     const storeScores = new Map<string, { bestItemsCount: number; totalItems: number }>();
 
@@ -122,7 +138,14 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
         totalItems,
         percentage: Math.round((bestItemsCount / totalItems) * 100),
       }))
-      .sort((a, b) => b.percentage - a.percentage);
+      .sort((a, b) => {
+        // 1. まず最安値の「品目数（件数）」で比較 (多い順)
+        if (b.bestItemsCount !== a.bestItemsCount) {
+          return b.bestItemsCount - a.bestItemsCount;
+        }
+        // 2. 品目数が全く同じなら、「最安値の割合（％）」で比較 (高い順)
+        return b.percentage - a.percentage;
+      });
   };
 
   const allPriceData = analyzePrices();
@@ -175,7 +198,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
                     <p className="text-sm font-bold">{store.storeName}</p>
                   </div>
                   <p className="text-xs text-orange-100">
-                    {store.bestItemsCount}/{store.totalItems}品目で最安値 ({store.percentage}%)
+                    最安値: <span className="font-bold text-white">{store.bestItemsCount}</span>品目 / 全{store.totalItems}品中 ({store.percentage}%)
                   </p>
                 </div>
               ))}
@@ -189,36 +212,6 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
             <TrendingDown className="size-5 text-orange-500" />
             <h3 className="font-bold text-gray-800">商品別価格</h3>
           </div>
-
-          {/* 検索欄 
-          <div className="relative mb-2">
-            <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="食材名で検索..."
-              className="w-full rounded-lg border border-gray-200 bg-gray-50 py-2 pl-9 pr-8 text-sm text-gray-800 outline-none transition-all focus:border-orange-400 focus:bg-white focus:ring-2 focus:ring-orange-100"
-            />
-            {searchQuery && (
-              <button
-                onClick={() => setSearchQuery('')}
-                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                aria-label="クリア"
-              >
-                <X className="size-4" />
-              </button>
-            )}
-          </div>
-
-          {/* 件数 
-          {searchQuery && (
-            <p className="mb-2 text-xs text-gray-500">
-              {priceData.length > 0
-                ? `「${searchQuery}」: ${priceData.length}件`
-                : `「${searchQuery}」に一致する食材はありません`}
-            </p>
-          )} */}
 
           {/* リスト */}
           <div className="max-h-[500px] space-y-3 overflow-y-auto">
@@ -293,12 +286,14 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
                   {idx === 0 && <span className="text-2xl">🥇</span>}
                   {idx === 1 && <span className="text-2xl">🥈</span>}
                   {idx === 2 && <span className="text-2xl">🥉</span>}
-                  <p className="font-bold">{store.storeName}</p>
+                  <p className="font-bold text-lg">{store.storeName}</p>
                 </div>
-                <p className="text-sm text-orange-100">
-                  {store.bestItemsCount}/{store.totalItems}品目で最安値
+                <p className="text-sm text-orange-500 bg-white rounded px-2 py-1 font-bold inline-block mb-2">
+                  最安値: {store.bestItemsCount} 品目
                 </p>
-                <p className="text-lg font-bold">{store.percentage}%</p>
+                <p className="text-xs text-orange-100">
+                  （この店の取扱品目のうち {store.percentage}% が最安値）
+                </p>
               </div>
             ))}
           </div>
