@@ -379,61 +379,95 @@ const submitReceiptPayload = async (requestBody: any) => {
     try {
       if (!requestBody) return;
 
+      // 日付の成形
+      let dateNum = 20260531;
       let dateStr = "2026-05-31";
       if (requestBody.purchased_at) {
         const s = String(requestBody.purchased_at);
         if (s.length === 8 && !s.includes("-")) {
+          dateNum = Number(s);
           dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
         } else if (s.includes("-")) {
           dateStr = s.split('T')[0];
+          dateNum = Number(dateStr.replace(/[-/]/g, ''));
         }
       }
 
-      // ユーザーが個別商品リスト(items)を入力、または手動在庫から渡ってきたか判定
+      // 明細が配列として存在しているか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
+      
+      // 💡 入力された店名を綺麗にし、もし「手動」という文字がなければ自動で【手動】を頭に付けます
+      const rawStoreName = (requestBody.store_name || "").trim() || "手動登録店舗";
+      const finalStoreName = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
+      
+      const isHandledInventory = rawStoreName === "手動在庫追加";
 
+      // 🚨 【最重要修正】明細がない一括登録 or 手動在庫追加の場合は、直接登録する！
+      if (!hasItems) {
+        const directPayload = {
+          // 💡 強制的に「手動在庫追加」にするのをやめ、入力された店名（【手動】〇〇）をそのまま使います！
+          store_name: finalStoreName,
+          purchased_at: dateNum,
+          total_amount: Number(requestBody.total_amount) || 0,
+          items: [
+            {
+              raw_name: "手動追加食材",
+              normalized_name: "手動追加食材",
+              product_id: null,
+              category_id: null,
+              is_inventory_target: true, // 在庫管理の対象にする
+              purchased_quantity: 1,
+              purchased_unit: "個",
+              unit_price: Number(requestBody.total_amount) || 0,
+              line_total: Number(requestBody.total_amount) || 0,
+              base_quantity: 1,
+              base_unit: "個"
+            }
+          ]
+        };
+
+        console.log("【直接本登録送信（店名維持版）】:", directPayload);
+        const response = await fetch(`${kakeibo_URL}/receipts`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(directPayload),
+        });
+
+        if (!response.ok) {
+          const errDetail = await response.json().catch(() => ({}));
+          console.error("直接登録エラー詳細:", errDetail);
+          throw new Error(`サーバーエラー: ${response.status}`);
+        }
+
+        await fetchExpenses();
+        return; 
+      }
+
+      // --- 通常の詳細明細がある場合（これまでの正常ルート） ---
       const prepareBody = {
         status: "needs_confirmation",
-        store_name: (requestBody.store_name || "手動登録店舗").trim(), 
+        store_name: finalStoreName, 
         purchased_at: dateStr, 
         total_amount: Number(requestBody.total_amount) || 0, 
-        items: hasItems 
-          ? requestBody.items.map((item: any) => {
-              const isFood = item.category_name === "食費" || item.normalized_name === "食費" || requestBody.store_name === "手動在庫追加";
-              const q = Number(item.purchased_quantity) || 1;
-              const u = item.purchased_unit || "個";
-              return {
-                raw_name: (item.raw_name || "手動登録商品").trim(),
-                normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-                category_name: isFood ? "食費" : (item.category_name && item.category_name.trim() !== "" ? item.category_name : "その他"), 
-                purchased_quantity: q,
-                purchased_unit: u,
-                // 💡 サーバーの最安値計算（0除算やnullエラー）を回避するため、あらかじめ基準数量をセット
-                base_quantity: q,
-                base_unit: u,
-                unit_price: Number(item.unit_price) || 0,
-                line_total: Number(item.line_total) || 0,
-                is_inventory_target: isFood,
-                confidence: 1.0,
-                warnings: []
-              };
-            })
-          : [
-              {
-                raw_name: "詳細未入力の支出（一括）",
-                normalized_name: "詳細未入力の支出",
-                category_name: "その他", 
-                purchased_quantity: 1,
-                purchased_unit: "個",
-                base_quantity: 1, 
-                base_unit: "個", 
-                unit_price: Number(requestBody.total_amount) || 0,
-                line_total: Number(requestBody.total_amount) || 0,
-                is_inventory_target: false,
-                confidence: 1.0,
-                warnings: []
-              }
-            ],
+        items: requestBody.items.map((item: any) => {
+          const isFood = item.category_name === "食費" || item.normalized_name === "食費";
+          const q = Number(item.purchased_quantity) || 1;
+          const u = item.purchased_unit || "個";
+          return {
+            raw_name: (item.raw_name || "手動登録商品").trim(),
+            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
+            category_name: isFood ? "食費" : (item.category_name && item.category_name.trim() !== "" ? item.category_name : "その他"), 
+            purchased_quantity: q,
+            purchased_unit: u,
+            base_quantity: q,
+            base_unit: u,
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
+            is_inventory_target: isFood,
+            confidence: 1.0,
+            warnings: []
+          };
+        }),
         warnings: []
       };
 
@@ -449,9 +483,8 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 【422 extra_forbidden ＆ invalid_receipt 完全撃退フィルター】
       const cleansedPayload: any = {
-        store_name: prepareBody.store_name, 
+        store_name: finalStoreName, 
         purchased_at: typeof finalizedReceipt.purchased_at === 'string'
           ? Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''))
           : Number(finalizedReceipt.purchased_at) || 20260531,
@@ -461,25 +494,7 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (Array.isArray(finalizedReceipt.items)) {
         cleansedPayload.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          if (!hasItems) {
-            return {
-              raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
-              normalized_name: "詳細未入力の支出",
-              product_id: null,
-              category_id: null,
-              is_inventory_target: false, 
-              base_quantity: 1,        
-              base_unit: "個",            
-              purchased_quantity: 1,
-              purchased_unit: "個",
-              unit_price: Number(cleansedPayload.total_amount),
-              line_total: Number(cleansedPayload.total_amount)
-            };
-          }
-
           const originalItem = requestBody.items[idx] || requestBody.items[0] || {};
-          const isHandledInventory = prepareBody.store_name === "手動在庫追加";
-
           const finalQty = Number(originalItem.purchased_quantity || item.purchased_quantity) || 1;
           const finalUnit = originalItem.purchased_unit || item.purchased_unit || "個";
 
@@ -488,14 +503,11 @@ const submitReceiptPayload = async (requestBody: any) => {
             normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
             product_id: item.product_id || null, 
             category_id: item.category_id || null,
-            is_inventory_target: isHandledInventory ? true : (item.category_name === "食費" || item.normalized_name === "食費"),
+            is_inventory_target: originalItem.category_name === "食費" || item.category_name === "食費" || item.normalized_name === "食費",
             purchased_quantity: finalQty, 
             purchased_unit: finalUnit,
             unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
             line_total: Number(originalItem.line_total || item.line_total) || 0,
-            
-            // ✨ 【超重要修正】最安値集計ロジックが正常に作動するよう、
-            // 確定送信データ（cleansedPayload）にも必ず数値と単位を明示的にセットして送ります！
             base_quantity: finalQty, 
             base_unit: finalUnit
           };
