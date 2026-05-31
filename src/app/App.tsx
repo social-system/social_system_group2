@@ -497,35 +497,51 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       }
 
       const isFoodCategory = expense.category === "食費";
+      const storeNameStr = (expense.description || "").trim();
 
-      // 🚨 【判定の修正】ただの配列長ではなく、文字がちゃんと入力された有効な明細が1件以上あるかで判定する
-      const hasValidItems = 
-        Array.isArray(expense.items) && 
-        expense.items.length > 0 && 
-        expense.items.some(item => item && item.raw_name && item.raw_name.trim() !== "");
+      // 1. まず文字の入った有効な明細が配列にあるかチェック
+      const validItems = Array.isArray(expense.items) 
+        ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
+        : [];
 
-      // --- パターンA: ちゃんと商品を追加した場合 ---
-      if (hasValidItems) {
+      // 🚨【最重要：自動コピー対策】
+      // 明細が1件だけで、その名前が「店舗名(説明欄)」と完全に一致している、
+      // または明細名が「買い物」「レシート」などの場合は、画面の「詳細商品を追加」ボタンを押していない（一括登録）と判定する。
+      let isBulkRegistration = false;
+      if (validItems.length === 0) {
+        isBulkRegistration = true;
+      } else if (validItems.length === 1) {
+        const firstName = validItems[0].raw_name.trim();
+        if (
+          firstName === storeNameStr || 
+          firstName === "買い物" || 
+          firstName === "レシート" || 
+          firstName === "手動登録商品"
+        ) {
+          isBulkRegistration = true;
+        }
+      }
+
+      // --- パターンA: 「詳細商品を追加」ボタンから、店舗名とは違う具体的な商品（肉など）を入力した場合 ---
+      if (!isBulkRegistration) {
         const dateStr = `${String(dateNum).substring(0, 4)}-${String(dateNum).substring(4, 6)}-${String(dateNum).substring(6, 8)}`;
         const prepareBody = {
           status: "needs_confirmation",
-          store_name: (expense.description || "手動登録店舗").trim(),
+          store_name: storeNameStr || "手動登録店舗",
           purchased_at: dateStr,
           total_amount: Number(expense.amount) || 0,
-          items: expense.items
-            ?.filter(item => item && item.raw_name && item.raw_name.trim() !== "") // 有効な商品のみに絞り込む
-            ?.map((item) => ({
-              raw_name: item.raw_name.trim(),
-              normalized_name: item.normalized_name.trim(),
-              category_name: expense.category || "食費",
-              purchased_quantity: Number(item.purchased_quantity) || 1,
-              purchased_unit: item.purchased_unit || "個",
-              base_quantity: Number(item.base_quantity) || 1,
-              base_unit: item.base_unit || "個",
-              unit_price: Number(item.unit_price) || 0,
-              line_total: Number(item.line_total) || 0,
-              is_inventory_target: isFoodCategory
-            }))
+          items: validItems.map((item) => ({
+            raw_name: item.raw_name.trim(),
+            normalized_name: item.normalized_name.trim(),
+            category_name: expense.category || "食費",
+            purchased_quantity: Number(item.purchased_quantity) || 1,
+            purchased_unit: item.purchased_unit || "個",
+            base_quantity: Number(item.base_quantity) || 1,
+            base_unit: item.base_unit || "個",
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
+            is_inventory_target: isFoodCategory
+          }))
         };
 
         const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
@@ -558,25 +574,26 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         }
 
       } else {
-        // --- パターンB: 詳細な商品は入力せず、一括登録した場合 ---
-        // サーバーのお節介（prepare）を絶対にスルーし、直接安全なデータを保存！
+        // --- パターンB: 店舗名だけ入力し、詳細な商品は入力せず一括登録した場合 ---
+        // サーバーのお節介（prepare）を確実にスルーし、絶対に比較されない未知の名前で直接データベースに保存！
         const directBody = {
           purchased_at: dateNum,
-          store_name: (expense.description || "手動登録店舗").trim(),
+          store_name: storeNameStr || "手動登録店舗",
           total_amount: Number(expense.amount) || 0,
           items: [
             {
+              // サーバーに商品登録・自動紐付けされないよう一括用名前に固定
               raw_name: `手動一括（${expense.category || "その他"}）`,
               normalized_name: "詳細未入力の支出",
               product_id: null,  
               category_id: null, 
               purchased_quantity: 1,
               purchased_unit: "個",
-              base_quantity: null, // 👈 null なのでサーバー側でも100%価格比較から除外される
+              base_quantity: null, // 👈 これを null にすることで最安値比較APIから100%除外されます
               base_unit: null,     
               unit_price: Number(expense.amount) || 0,
               line_total: Number(expense.amount) || 0,
-              is_inventory_target: false // 在庫・比較対象外
+              is_inventory_target: false // 在庫対象外
             }
           ]
         };
