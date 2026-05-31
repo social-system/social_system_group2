@@ -387,12 +387,13 @@ const submitReceiptPayload = async (requestBody: any) => {
         total_amount: Number(requestBody.total_amount) || 0, 
         items: hasItems 
           ? requestBody.items.map((item: any) => {
-              // ✨ 【修正】カテゴリ名が「食費」の場合のみ在庫対象(isFood)とする判定を厳格化
+              // ✨ カテゴリ名が最初から「食費」と分かっている場合のみ初期仮フラグを立てる
               const isFood = item.category_name === "食費" || item.normalized_name === "食費";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
                 normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-                category_name: item.category_name || "食費", 
+                // ✨ 補完前で空（空文字やnull、undefined）なら、勝手に食費にせず null のままサーバーに渡して推測させる
+                category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : null, 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
                 base_quantity: isFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
@@ -435,10 +436,10 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【超重要・大改修】サーバーから戻ってきた各商品データに対して、本来のカテゴリに合わせた在庫フラグを正しく再適用する
+      // 🚨 【超厳格変更ガード】サーバーから戻ってきた最終的な自動補完カテゴリを元に、在庫対象かを1品ずつ再検証
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          // 1. 一括登録（明細なし）の場合
+          // 1. ユーザーが個別詳細を登録していない（＝一括登録）の場合
           if (!hasItems) {
             return {
               ...item,
@@ -446,26 +447,28 @@ const submitReceiptPayload = async (requestBody: any) => {
               normalized_name: "詳細未入力の支出",
               product_id: null,
               category_id: null,
-              is_inventory_target: false, // 在庫対象外
-              base_quantity: null,
-              base_unit: null,
+              is_inventory_target: false, 
+              base_quantity: null,        
+              base_unit: null,            
               purchased_quantity: 1,
               purchased_unit: "個"
             };
           }
 
-          // 2. カメラ撮影による個別詳細がある場合
-          // サーバーに送る前の「オリジナルの明細データ」から、そのアイテムが本当に食費だったか(is_inventory_target)を取得
-          const orig = prepareBody.items[idx];
-          const isRealFoodTarget = orig ? orig.is_inventory_target : false;
+          // 2. 個別詳細商品がある通常ケース
+          // サーバーが最終的に判断・自動補完してきたカテゴリ名を取得
+          const finalCategory = item.category_name || "";
+          const finalNormName = item.normalized_name || "";
+
+          // ✨ 元のデータが空だろうが何だろうが、「最終結果が『食費』」になったものだけを100%在庫対象(true)とする！
+          const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
           return {
             ...item,
-            category_name: orig ? orig.category_name : (item.category_name || "食費"),
-            product_id: isRealFoodTarget ? (item.product_id || null) : null, 
-            is_inventory_target: isRealFoodTarget, // 👈 ✨ここで文具などの「false」が確実に維持されます！
-            base_quantity: isRealFoodTarget ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
-            base_unit: isRealFoodTarget ? (item.base_unit || "個") : null 
+            product_id: isRealFood ? (item.product_id || null) : null, 
+            is_inventory_target: isRealFood, // 👈 これで文具等に自動補完されたデータは「false」になり冷蔵庫に絶対入りません！
+            base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
+            base_unit: isRealFood ? (item.base_unit || "個") : null 
           };
         });
       }
