@@ -244,7 +244,7 @@ export default function App() {
     }
   };
 
-  const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
+const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
     const newInventory: InventoryItem[] = [];
     allExpenses.forEach((exp) => {
       if (exp.items && Array.isArray(exp.items)) {
@@ -253,7 +253,7 @@ export default function App() {
             newInventory.push({
               id: item.id ? item.id.toString() : `${exp.id}-${item.raw_name}`,
               name: item.normalized_name || item.raw_name,
-              quantity: item.base_quantity,
+              quantity: Number(item.base_quantity) || 1,
               unit: item.base_unit || "個",
               category: "食材在庫",
             });
@@ -303,7 +303,34 @@ export default function App() {
                 const detailRes = await fetch(`${kakeibo_URL}/receipts/${item.id}`);
                 if (detailRes.ok) {
                   const detailData = await detailRes.json();
-                  itemsPayload = detailData.items || [];
+                  
+                  // 🚨 【超重要ガード】読み込み時に「買い物」などの一括支出データを強制排除する
+                  if (Array.isArray(detailData.items)) {
+                    itemsPayload = detailData.items.map((subItem: any) => {
+                      const name = subItem.raw_name || "";
+                      const normName = subItem.normalized_name || "";
+                      
+                      // 名前に「買い物」や「支出」、「未分類」が含まれている塊データか判定
+                      const isBulkBlock = 
+                        name.includes("買い物") || 
+                        normName.includes("買い物") || 
+                        name.includes("支出") ||
+                        normName.includes("支出") ||
+                        normName.includes("未分類");
+
+                      if (isBulkBlock) {
+                        return {
+                          ...subItem,
+                          is_inventory_target: false, // 👈 強制的にfalseにして比較欄から追放
+                          base_quantity: null,        // 👈 nullにして比較対象外にする
+                          base_unit: null
+                        };
+                      }
+                      return subItem;
+                    });
+                  } else {
+                    itemsPayload = [];
+                  }
                 }
               } catch (err) {
                 console.error(`レシート詳細(id:${item.id})の取得に失敗しました`, err);
