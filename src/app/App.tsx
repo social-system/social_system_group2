@@ -387,12 +387,11 @@ const submitReceiptPayload = async (requestBody: any) => {
         total_amount: Number(requestBody.total_amount) || 0, 
         items: hasItems 
           ? requestBody.items.map((item: any) => {
-              // ✨ カテゴリ名が最初から「食費」と分かっている場合のみ初期仮フラグを立てる
               const isFood = item.category_name === "食費" || item.normalized_name === "食費";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
                 normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-                // ✨ 補完前で空（空文字やnull、undefined）なら、勝手に食費にせず null のままサーバーに渡して推測させる
+                // 空、null、undefinedの場合は一律 null としてサーバーへ送る
                 category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : null, 
                 purchased_quantity: Number(item.purchased_quantity) || 1,
                 purchased_unit: item.purchased_unit || "個",
@@ -436,10 +435,10 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【超厳格変更ガード】サーバーから戻ってきた最終的な自動補完カテゴリを元に、在庫対象かを1品ずつ再検証
+      // 🚨 【超厳格・在庫誤登録防止フィルター】
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          // 1. ユーザーが個別詳細を登録していない（＝一括登録）の場合
+          // 1. 一括登録（明細なし）の場合
           if (!hasItems) {
             return {
               ...item,
@@ -456,17 +455,20 @@ const submitReceiptPayload = async (requestBody: any) => {
           }
 
           // 2. 個別詳細商品がある通常ケース
-          // サーバーが最終的に判断・自動補完してきたカテゴリ名を取得
+          // サーバーから返ってきた最終的なカテゴリー名と正規化名を取得
           const finalCategory = item.category_name || "";
           const finalNormName = item.normalized_name || "";
 
-          // ✨ 元のデータが空だろうが何だろうが、「最終結果が『食費』」になったものだけを100%在庫対象(true)とする！
+          // 🔥 【最重要変更】カテゴリーが「食費」とハッキリ確定している場合のみ true にする。
+          // 空（null）や「文具」「日用品」などの場合は例外なく100% false（在庫対象外）にする。
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
           return {
             ...item,
+            // カテゴリーが空(null)のままなら、フロント側で安全のために「未分類」や「その他」を明示的にセットしてサーバーの誤作動を防ぐ
+            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
             product_id: isRealFood ? (item.product_id || null) : null, 
-            is_inventory_target: isRealFood, // 👈 これで文具等に自動補完されたデータは「false」になり冷蔵庫に絶対入りません！
+            is_inventory_target: isRealFood, // 👈 これで万年筆などの null や空データは確実に false に固定されます！
             base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
             base_unit: isRealFood ? (item.base_unit || "個") : null 
           };
