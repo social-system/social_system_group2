@@ -264,7 +264,7 @@ const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
     setInventory(newInventory);
   };
 
-  const fetchExpenses = async () => {
+const fetchExpenses = async () => {
     try {
       const res = await fetch(`${kakeibo_URL}/receipts`); 
       if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
@@ -337,10 +337,22 @@ const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
               }
             }
 
+            // 💡 【ここを追加】店名やフラグから、手動登録されたデータか賢く判定する
+            const isManualInput = 
+              item.is_manual === true || 
+              item.source_type === "manual" ||
+              (item.store_name && (
+                item.store_name.includes("手動") || 
+                item.store_name.includes("レシピ") || 
+                item.store_name === "SHOP" ||
+                item.store_name === "AIレシピ適応調理"
+              ));
+
             return {
               id: currentId,
               amount: Number(item.total_amount) || 0,
-              category: "レシートデータ",
+              // ✨ 固定ではなく、判定結果によって表示を正しく切り替える
+              category: isManualInput ? "手動入力" : "レシートデータ",
               description: item.store_name || "店舗名未設定",
               date: parsedDate,
               items: itemsPayload
@@ -788,60 +800,88 @@ const deleteInventoryItemCall = async (id: string) => {
     }
   };
 
-  const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
+const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
     if (isFetchingPrices) return;
     setIsFetchingPrices(true);
     setShopPrices([]); 
 
     try {
-      const missingIngredient = recipe.ingredients.find(ing => !ing.isInFridge && ing.productId);
+      // 1. 冷蔵庫になくて、かつproductIdが存在する「すべての足りない材料」を抽出
+      const missingIngredients = recipe.ingredients.filter(
+        ing => !ing.isInFridge && ing.productId && ing.productId > 0
+      );
 
-      if (missingIngredient && missingIngredient.productId) {
-        const pId = missingIngredient.productId;
-        const response = await fetch(`${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`);
-        
-        if (response.ok) {
-          const data = await response.json();
-
-          if (data && data.cheapest) {
-            const cheapestInfo = data.cheapest;
-            const basePrice = Math.round(cheapestInfo.price_per_base_unit);
-
-            const realShopEstimates: ShopPriceEstimate[] = [
-              { 
-                shopName: `${cheapestInfo.store_name} (過去最安店)`, 
-                totalPrice: basePrice 
-              },
-              { 
-                shopName: "ライフマート (周辺参考価格)", 
-                totalPrice: Math.round(basePrice * 1.15) 
-              },
-              { 
-                shopName: "ネットスーパー西友 (配送料込)", 
-                totalPrice: Math.round(basePrice * 1.05), 
-                deliveryFee: 200 
-              }
-            ];
-
-            setShopPrices(realShopEstimates);
-            setIsFetchingPrices(false);
-            return; 
-          }
-        }
+      // 足りない材料が一切ない場合は、合計0円として処理を抜ける
+      if (missingIngredients.length === 0) {
+        setShopPrices([
+          { shopName: "すべての材料が冷蔵庫に揃っています！", totalPrice: 0 }
+        ]);
+        setIsFetchingPrices(false);
+        return;
       }
 
-      const mockShopPrices: ShopPriceEstimate[] = [
-        { shopName: "スーパー丸エツ (目安価格)", totalPrice: 320 },
-        { shopName: "ライフマート (目安価格)", totalPrice: 350 },
-        { shopName: "ネットスーパー西友 (配送料込)", totalPrice: 300, deliveryFee: 200 }
+      // 各店舗ごとの合計金額を保持する変数
+      let cheapestStoreName = "";
+      let cheapestStoreTotal = 0;
+      let fallbackTotal = 0; // 最安店舗データがない場合のフォールバック用
+
+      // 2. 足りない材料すべての最安単価を非同期で並列に取得
+      await Promise.all(
+        missingIngredients.map(async (ing) => {
+          // レシピで必要な数量をパース (例: "200g" -> 200, "2個" -> 2)
+          const neededQty = parseFloat(ing.amount) || 1.00;
+
+          try {
+            const response = await fetch(
+              `${kakeibo_URL}/prices/cheapest?product_id=${ing.productId}&period_days=90`
+            );
+            
+            if (response.ok) {
+              const data = await response.json();
+              if (data && data.cheapest) {
+                const cheapestInfo = data.cheapest;
+                // バックエンド仕様: 単価 (line_total / base_quantity)
+                const unitPrice = parseFloat(cheapestInfo.price_per_base_unit) || 0;
+                
+                // 💡 【超重要】単価 × レシピの必要量 でこの材料の金額を算出
+                const costForThisIngredient = unitPrice * neededQty;
+
+                cheapestStoreName = cheapestInfo.store_name; // 最後に取得した店舗名（簡易的ですが実用十分）
+                cheapestStoreTotal += costForThisIngredient;
+                fallbackTotal += costForThisIngredient;
+                return;
+              }
+            }
+          } catch (e) {
+            console.warn(`商品ID:${ing.productId} の最安値取得に失敗`, e);
+          }
+
+          // 過去の購入データがバックエンドにない、またはエラー時のフォールバック（目安1品300円換算）
+          fallbackTotal += 300;
+        })
+      );
+
+// 3. 計算結果から、すべての足りない材料の合計購入目安を組み立てる
+      const finalCheapestStore = cheapestStoreName || "過去最安店";
+      const finalBasePrice = Math.round(cheapestStoreTotal > 0 ? cheapestStoreTotal : fallbackTotal);
+
+      // ✨ 最安値店舗（1位）のデータだけを配列に格納
+      const singleCheapestEstimate: ShopPriceEstimate[] = [
+        { 
+          shopName: `${finalCheapestStore} (過去最安値)`, 
+          totalPrice: finalBasePrice,
+          deliveryFee: 0
+        }
       ];
-      setShopPrices(mockShopPrices);
+
+      // 1店舗だけをセットして画面に表示させる
+      setShopPrices(singleCheapestEstimate);
 
     } catch (err) {
-      console.error("最安店舗の取得に失敗しました:", err);
+      console.error("価格シミュレーション全体でエラーが発生しました:", err);
+      // 万が一のエラー・オフライン時のフォールバックも1店舗だけに絞る
       setShopPrices([
-        { shopName: "スーパー丸エツ (オフライン目安)", totalPrice: 320 },
-        { shopName: "ライフマート (オフライン目安)", totalPrice: 350 }
+        { shopName: "スーパー丸エツ (目安価格)", totalPrice: 350 }
       ]);
     } finally {
       setIsFetchingPrices(false);
