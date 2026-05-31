@@ -387,6 +387,7 @@ const submitReceiptPayload = async (requestBody: any) => {
         total_amount: Number(requestBody.total_amount) || 0, 
         items: hasItems 
           ? requestBody.items.map((item: any) => {
+              // ✨ 【修正】カテゴリ名が「食費」の場合のみ在庫対象(isFood)とする判定を厳格化
               const isFood = item.category_name === "食費" || item.normalized_name === "食費";
               return {
                 raw_name: (item.raw_name || "手動登録商品").trim(),
@@ -434,34 +435,37 @@ const submitReceiptPayload = async (requestBody: any) => {
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 🚨 【超強力ガード】サーバーがprepareで勝手に補完・偽造してきたデータを、確定保存の直前で完全に破壊・リセットする
+      // 🚨 【超重要・大改修】サーバーから戻ってきた各商品データに対して、本来のカテゴリに合わせた在庫フラグを正しく再適用する
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          // ユーザーが個別詳細を登録していない（＝一括登録）の場合
+          // 1. 一括登録（明細なし）の場合
           if (!hasItems) {
             return {
               ...item,
               raw_name: `${prepareBody.store_name}での買い物（比較対象外）`,
               normalized_name: "詳細未入力の支出",
-              product_id: null,           // サーバーが勝手に割り当てたIDを消滅させる
+              product_id: null,
               category_id: null,
-              is_inventory_target: false, // 在庫対象から絶対に外す
-              base_quantity: null,        // 最安値比較計算から100%除外する
-              base_unit: null,            // 最安値比較計算から100%除外する
+              is_inventory_target: false, // 在庫対象外
+              base_quantity: null,
+              base_unit: null,
               purchased_quantity: 1,
               purchased_unit: "個"
             };
           }
 
-          // 個別詳細商品が入力されている通常ケース
+          // 2. カメラ撮影による個別詳細がある場合
+          // サーバーに送る前の「オリジナルの明細データ」から、そのアイテムが本当に食費だったか(is_inventory_target)を取得
           const orig = prepareBody.items[idx];
-          const isTarget = orig ? orig.is_inventory_target : false;
+          const isRealFoodTarget = orig ? orig.is_inventory_target : false;
+
           return {
             ...item,
-            product_id: isTarget ? (item.product_id || null) : null, 
-            is_inventory_target: isTarget,
-            base_quantity: isTarget ? (Number(item.base_quantity) || 1) : null, 
-            base_unit: isTarget ? (item.base_unit || "個") : null 
+            category_name: orig ? orig.category_name : (item.category_name || "食費"),
+            product_id: isRealFoodTarget ? (item.product_id || null) : null, 
+            is_inventory_target: isRealFoodTarget, // 👈 ✨ここで文具などの「false」が確実に維持されます！
+            base_quantity: isRealFoodTarget ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null, 
+            base_unit: isRealFoodTarget ? (item.base_unit || "個") : null 
           };
         });
       }
