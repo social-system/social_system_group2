@@ -22,21 +22,14 @@ import { AddExpenseForm } from "./components/AddExpenseForm";
 import { AddInventoryForm } from "./components/AddInventoryForm";
 import { AddRecipeForm } from "./components/AddRecipeForm";
 import { SettingsModal } from "./components/SettingsModal";
+import { PriceComparison } from "./components/PriceComparison";
+import { WelcomeScreen } from "./components/WelcomeScreen";
 
-
-//const kakeibo_URL = "http://localhost:8000";
-//const kakeibo_URL = "https://social-system-group2.onrender.com";
-//const kakeibo_URL = "https://social-system-group2-3.onrender.com";
+// バックエンドURL定義 (App.tsxに準拠)
 const kakeibo_URL = "https://social-system-group2-2.onrender.com";
-
-
-//const recipe_URL = "http://localhost:8080";
 const recipe_URL = "https://social-system-group2-1.onrender.com";
 
-
-
-
-// --- 型定義 ---
+// --- 型定義 (App.tsxに準拠) ---
 interface RecipeIngredient {
   name: string;
   amount: string;
@@ -64,7 +57,6 @@ export const RecipeListCall = ({ recipes, onDelete, inventory, onSelectRecipe }:
 
         return (
           <div key={recipe.id} className="flex items-center justify-between p-4 border rounded-lg hover:bg-gray-50 transition-all bg-white gap-4">
-            {/* 左側：レシピの基本情報 */}
             <div className="flex-1 min-w-[180px]">
               <h3 className="font-bold text-gray-800 text-base line-clamp-1">{recipe.title}</h3>
               <p className="text-sm text-gray-500 mt-0.5">
@@ -72,7 +64,6 @@ export const RecipeListCall = ({ recipes, onDelete, inventory, onSelectRecipe }:
               </p>
             </div>
             
-            {/* 中央：足りない材料 */}
             <div className="flex-2 flex items-center justify-center px-2">
               {missingIngredients.length > 0 ? (
                 <div className="flex items-center gap-1 bg-amber-50 border border-amber-200 text-amber-800 rounded-md p-2 text-xs max-w-xs">
@@ -88,7 +79,6 @@ export const RecipeListCall = ({ recipes, onDelete, inventory, onSelectRecipe }:
               )}
             </div>
             
-            {/* 右側：アクションボタン */}
             <div className="flex items-center gap-2 shrink-0">
               <button
                 type="button"
@@ -176,7 +166,7 @@ export interface UserSettings {
 }
 
 export default function App() {
-  // 初期ダミーデータを空の配列 [] に変更
+  // 状態定義 (App.tsx準拠の空配列スタート)
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
@@ -185,6 +175,7 @@ export default function App() {
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [showWelcome, setShowWelcome] = useState(false); // Appchange仕様
 
   const [settings, setSettings] = useState<UserSettings>({
     staples: [],
@@ -207,22 +198,28 @@ export default function App() {
     setIsFetchingPrices(false);
   };
 
-  // 日付オブジェクトから「YYYYMMDD」の数値を作成する共通ヘルパー
   const formatToYmdNumber = (date: Date) => {
     const targetDate = date instanceof Date ? date : new Date(date);
     return Number(targetDate.toISOString().split('T')[0].replace(/-/g, ''));
   };
 
-
-useEffect(() => {
-    if (!settings.isSetupComplete) {
-      setShowSettings(true);
+  // 初期読み込みロジック (App.tsxをベースにAppchangeのWelcome判定を合成)
+  useEffect(() => {
+    const savedSettings = localStorage.getItem('userSettings');
+    if (savedSettings) {
+      const parsed = JSON.parse(savedSettings);
+      setSettings(parsed);
+      if (!parsed.isSetupComplete) {
+        setShowWelcome(true);
+      }
+    } else {
+      setShowWelcome(true);
     }
     fetchExpenses();
-    fetchInventoryBalances(); // ★アプリ起動時に在庫も直接取得する
+    fetchInventoryBalances();
   }, []);
 
-// ★新設: サーバーから直接最新の在庫一覧を取得してStateを同期する
+  // API連動関数 (App.tsx準拠)
   const fetchInventoryBalances = async () => {
     try {
       const res = await fetch(`${kakeibo_URL}/inventory/balances?include_zero=false`);
@@ -230,10 +227,8 @@ useEffect(() => {
       const data = await res.json();
 
       if (data && Array.isArray(data.items)) {
-        // サーバーから返ってきた最新の在庫配列でStateを上書き
-        //（最後の1個を削除して空配列 `[]` になった場合も正しく画面が空になります）
         const formattedInventory = data.items.map((item: any) => ({
-          id: item.product_id.toString(), // product_id を一意のIDとして利用
+          id: item.product_id.toString(),
           name: item.normalized_name || "不明な食材",
           quantity: item.current_quantity,
           unit: item.base_unit || "個",
@@ -249,7 +244,6 @@ useEffect(() => {
     }
   };
 
-  // 取得した全レシート明細の `is_inventory_target` からフロントの在庫状態を完全同期するロジック
   const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
     const newInventory: InventoryItem[] = [];
     allExpenses.forEach((exp) => {
@@ -270,62 +264,16 @@ useEffect(() => {
     setInventory(newInventory);
   };
 
-  // 家計簿・レシートデータの読み込み (サマリー取得後、個別詳細を並列マージ)
-  const fetchExpensesOLD = async () => {
+  const fetchExpenses = async () => {
     try {
       const res = await fetch(`${kakeibo_URL}/receipts`); 
       if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
       const summaryData = await res.json();
       
-      if (Array.isArray(summaryData)) {
-        const detailedExpenses: Expense[] = await Promise.all(
-          summaryData.map(async (item: any) => {
-            const dateStr = String(item.purchased_at);
-            const y = Number(dateStr.substring(0, 4));
-            const m = Number(dateStr.substring(4, 6)) - 1;
-            const d = Number(dateStr.substring(6, 8));
-            
-            let itemsPayload: ReceiptItemPayload[] = [];
-            try {
-              const detailRes = await fetch(`${kakeibo_URL}/receipts/${item.id}`);
-              if (detailRes.ok) {
-                const detailData = await detailRes.json();
-                itemsPayload = detailData.items || [];
-              }
-            } catch (err) {
-              console.error(`レシート詳細(id:${item.id})の取得に失敗しました`, err);
-            }
-
-            return {
-              id: item.id.toString(),
-              amount: item.total_amount,
-              category: "レシートデータ",
-              description: item.store_name || "店舗名未設定",
-              date: new Date(y, m, d),
-              items: itemsPayload
-            };
-          })
-        );
-        
-        setExpenses(detailedExpenses);
-        syncInventoryFromExpenses(detailedExpenses);
-      }
-    } catch (err) {
-      console.error("読み込み失敗", err);
-    }
-  };
-
-const fetchExpenses = async () => {
-    try {
-      const res = await fetch(`${kakeibo_URL}/receipts`); 
-      if (!res.ok) throw new Error(`サーバーエラー: ${res.status}`);
-      const summaryData = await res.json();
-      
-      // ★修正: length > 0 の縛りを無くし、配列であれば常に安全に処理する
       if (Array.isArray(summaryData)) {
         if (summaryData.length === 0) {
           setExpenses([]);
-          setInventory([]); // データがなければ在庫も空に
+          setInventory([]);
           return;
         }
 
@@ -388,141 +336,10 @@ const fetchExpenses = async () => {
     }
   };
     
-  // 共通のレシート登録用関数
-  const submitReceiptPayloadOLD = async (requestBody: any) => {
-    try {
-      const response = await fetch(`${kakeibo_URL}/receipts`, {  
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(requestBody),
-      });
-
-      if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
-      await fetchExpenses(); 
-    } catch (err) {
-      console.error("レシートデータの送信に失敗しました:", err);
-      alert("サーバーへの保存に失敗しました。");
-    }
-  };
-
-
-//  const submitReceiptPayload = async (requestBody: any) => {
-//      try {
-//        if (!requestBody) return;
-//
-//        // 1. フロントのデータを prepare が受け取れる文字列日付にする
-//        let dateStr = "2026-05-26";
-//        if (requestBody.purchased_at) {
-//          const s = String(requestBody.purchased_at);
-//          if (s.length === 8) {
-//            dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
-//          } else if (s.includes("-")) {
-//            dateStr = s;
-//          }
-//        }
-//
-//        const prepareBody = {
-//          status: "needs_confirmation",
-//          store_name: requestBody.store_name || "手動在庫追加",
-//          purchased_at: dateStr, 
-//          total_amount: Number(requestBody.total_amount) || 0,
-//          items: Array.isArray(requestBody.items) 
-//            ? requestBody.items.map((item: any) => ({
-//                raw_name: item.raw_name || "手動登録商品",
-//                normalized_name: item.normalized_name || item.raw_name || "手動登録商品",
-//                category_name: "食費", 
-//                purchased_quantity: Number(item.purchased_quantity) || 1,
-//                purchased_unit: item.purchased_unit || "個",
-//                base_quantity: Number(item.base_quantity || item.purchased_quantity) || 1,
-//                base_unit: item.base_unit || item.purchased_unit || "個",
-//                unit_price: Number(item.unit_price) || 0,
-//                line_total: Number(item.line_total) || 0,
-//                is_inventory_target: item.is_inventory_target ?? true,
-//                confidence: 1.0,
-//                warnings: []
-//              }))
-//            : [],
-//          warnings: []
-//        };
-//
-//        // 2. /receipts/prepare を叩いて、商品IDや単位を補完してもらう
-//        console.log("prepareに送信する下書き:", prepareBody);
-//        const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
-//          method: "POST",
-//          headers: { "Content-Type": "application/json" },
-//          body: JSON.stringify(prepareBody),
-//        });
-//
-//        if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
-//        const prepareData = await prepareResponse.json();
-//        const finalizedReceipt = prepareData.receipt;
-//
-//        if (!finalizedReceipt || !Array.isArray(finalizedReceipt.items)) {
-//          throw new Error("サーバーからの自動補完結果が不正です。");
-//        }
-//
-//        // 3. ★修正ポイント: 家計簿には登録せず、在庫追加用（inventory/batches）のデータを作成する
-//        // 新仕様の POST /inventory/batches に適合する配列形式へ変換
-//        const inventoryBatchesPayload = finalizedReceipt.items
-//          .filter((item: any) => item.is_inventory_target !== false) // 在庫対象のみ
-//          .map((item: any) => {
-//            // purchased_at を YYYYMMDD の整数に変換
-//            const rawDate = finalizedReceipt.purchased_at || 20260526;
-//            const cleanDate = typeof rawDate === 'string' ? Number(rawDate.replace(/[-/]/g, '')) : Number(rawDate);
-//
-//            return {
-//              product_id: Number(item.product_id) || 1,
-//              original_quantity: Number(item.base_quantity) || Number(item.purchased_quantity) || 1,
-//              unit: item.base_unit || item.purchased_unit || "個",
-//              purchased_at: cleanDate,
-//              // 任意項目（不要なら省略可）
-//              store_name: finalizedReceipt.store_name || "手動在庫追加",
-//              receipt_id: null // 家計簿を通さないためnull
-//            };
-//          });
-//
-//        if (inventoryBatchesPayload.length === 0) {
-//          alert("在庫対象の食材がありません。");
-//          return;
-//        }
-//
-//        // 4. 在庫直接追加API（POST /inventory/batches）にリクエストを送信
-//        console.log("在庫直接追加へ送信するペイロード:", inventoryBatchesPayload);
-//        const response = await fetch(`${kakeibo_URL}/inventory/batches`, {  
-//          method: "POST",
-//          headers: { "Content-Type": "application/json" },
-//          body: JSON.stringify(inventoryBatchesPayload), // 配列のまま送信
-//        });
-//
-//        if (!response.ok) {
-//          const errorDetail = await response.json().catch(() => ({}));
-//          console.error("在庫追加のサーバーエラー詳細:", errorDetail);
-//          throw new Error(`在庫追加エラー: ${response.status}`);
-//        }
-//
-//        // 5. 家計簿(expenses)ではなく、在庫一覧(inventory)を更新する
-//        if (typeof (window as any).fetchInventory === "function") {
-//          await (window as any).fetchInventory();
-//        }
-//// 5. 家計簿ではなく、直接最新の在庫一覧をサーバーから再取得する
-//        await fetchInventoryBalances(); 
-//        // 念のため家計簿側もリフレッシュ
-//        await fetchExpenses(); 
-//
-//        alert("在庫の手動追加に成功しました！");
-//
-//
-//      } catch (err) {
-//        console.error("送信プロセス失敗:", err);
-//        alert("サーバーへの保存に失敗しました。");
-//      }
-//    };
-// 4. 手動在庫追加の確定版 (仕様書に準拠したレシート経由の登録)
   const submitReceiptPayload = async (requestBody: any) => {
     try {
       if (!requestBody) return;
 
-      // 1. prepare が求める YYYY-MM-DD 文字列を作る
       let dateStr = "2026-05-26";
       if (requestBody.purchased_at) {
         const s = String(requestBody.purchased_at);
@@ -535,9 +352,9 @@ const fetchExpenses = async () => {
 
       const prepareBody = {
         status: "needs_confirmation",
-        store_name: "手動在庫追加", // 👈 後で家計簿一覧から非表示にするための目印
+        store_name: "手動在庫追加", 
         purchased_at: dateStr, 
-        total_amount: 0, // 在庫のみ追加なので 0 円
+        total_amount: 0, 
         items: Array.isArray(requestBody.items) 
           ? requestBody.items.map((item: any) => ({
               raw_name: (item.raw_name || "手動登録商品").trim(),
@@ -557,7 +374,6 @@ const fetchExpenses = async () => {
         warnings: []
       };
 
-      console.log("在庫追加用 prepare 送信:", prepareBody);
       const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -565,16 +381,11 @@ const fetchExpenses = async () => {
       });
 
       if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
-      console.log("prepare出力確認", prepareResponse);
       const prepareData = await prepareResponse.json();
-      console.log("prepare出力確認json", prepareData);
       const finalizedReceipt = prepareData.receipt;
-      console.log("prepare出力確認receipt", finalizedReceipt);
 
       if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
 
-      // 2. ★仕様書厳守: 本登録(/receipts)に送るため、アイテムの在庫対象フラグを確実に true にし、
-      // 日付も YYYYMMDD の「整数(Number)」に完全変換されていることを保証・修正する
       if (Array.isArray(finalizedReceipt.items)) {
         finalizedReceipt.items = finalizedReceipt.items.map((item: any) => ({
           ...item,
@@ -584,15 +395,11 @@ const fetchExpenses = async () => {
         }));
       }
       
-      // 日付がハイフン付き文字列のまま残っていた場合の安全ガード（数値化）
       if (typeof finalizedReceipt.purchased_at === 'string') {
         finalizedReceipt.purchased_at = Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''));
       }
       finalizedReceipt.total_amount = 0;
 
-      console.log("仕様書に準拠した形式でレシート本登録へ送信:", finalizedReceipt);
-
-      // 3. 本物エンドポイント /receipts にオブジェクトを POST
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -600,12 +407,9 @@ const fetchExpenses = async () => {
       });
 
       if (!response.ok) {
-        const errorDetail = await response.json().catch(() => ({}));
-        console.error("本登録エラー詳細:", errorDetail);
         throw new Error(`サーバーエラー: ${response.status}`);
       }
 
-      // 4. 再取得して画面を同期
       await fetchExpenses(); 
       alert("在庫の手動追加に成功しました！");
     } catch (err) {
@@ -613,11 +417,9 @@ const fetchExpenses = async () => {
       alert("サーバーへの保存に失敗しました。");
     }
   };
-  // 手動家計簿追加
-// 5. 手動家計簿データ追加 (直接 POST /receipts を叩くように修正)
+
   const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
     try {
-      // 画面から入力された日付を、バックエンドが求める「整数型 (YYYYMMDD)」に安全変換
       let dateNum = 20260526;
       if (expense.date) {
         const d = new Date(expense.date);
@@ -627,7 +429,6 @@ const fetchExpenses = async () => {
         dateNum = Number(`${y}${m}${day}`);
       }
 
-      // バックエンドの仕様書（POST /receipts）に完全適合するデータ構造を作成
       const requestBody = {
         purchased_at: dateNum,
         store_name: (expense.description || "手動登録店舗").trim(),
@@ -636,22 +437,19 @@ const fetchExpenses = async () => {
           {
             raw_name: (expense.description || "手動登録商品").trim(),
             normalized_name: (expense.category || "娯楽").trim(),
-            product_id: null,  // 家計簿単体登録のため null でOK
-            category_id: null, // カテゴリは文字列で渡すか、nullにしてバックエンドに任せる
+            product_id: null,  
+            category_id: null, 
             purchased_quantity: 1,
             purchased_unit: "個",
             base_quantity: 1,
             base_unit: "個",
             unit_price: Number(expense.amount) || 0,
             line_total: Number(expense.amount) || 0,
-            is_inventory_target: false // 家計簿専用フォームからのため false 固定
+            is_inventory_target: false 
           }
         ]
       };
 
-      console.log("手動家計簿登録の送信ペイロード:", requestBody);
-
-      // 直接本登録APIを呼び出す
       const response = await fetch(`${kakeibo_URL}/receipts`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -659,12 +457,9 @@ const fetchExpenses = async () => {
       });
 
       if (!response.ok) {
-        const errorDetail = await response.json().catch(() => ({}));
-        console.error("手動家計簿登録エラー詳細:", errorDetail);
         throw new Error(`サーバーエラー: ${response.status}`);
       }
 
-      // 家計簿一覧（expenses）を再取得して画面を更新
       await fetchExpenses(); 
       alert("家計簿にデータを登録しました！");
     } catch (err) {
@@ -673,16 +468,13 @@ const fetchExpenses = async () => {
     }
   };
 
-  // 4. 家計簿・レシートデータ削除 (DELETE /receipts/{receipt_id} 仕様に完全準拠)
-const deleteExpenseCall = async (id: string) => {
+  const deleteExpenseCall = async (id: string) => {
     try {
-      console.log(`家計簿削除リクエスト送信中... ID: ${id}`);
       const response = await fetch(`${kakeibo_URL}/receipts/${id}`, {
         method: "DELETE",
       });
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
       
-      // 削除成功後、即座にサーバーの最新状態を再取得して画面を100%同期
       await fetchExpenses();
       await fetchInventoryBalances();
       
@@ -697,7 +489,6 @@ const deleteExpenseCall = async (id: string) => {
     setRecipes(recipes.filter((r) => r.id !== id));
   };
 
-  // 5. 手動在庫追加 (POST /receipts 仕様に準拠させ、is_inventory_targetをtrueにする)
   const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
     const requestBody = {
       purchased_at: formatToYmdNumber(new Date()),
@@ -722,23 +513,13 @@ const deleteExpenseCall = async (id: string) => {
     await submitReceiptPayload(requestBody);
   };
 
-// 6. 在庫データ削除 (DELETE /receipts/{id} 仕様に連動)
-// 5. 在庫消費・手動削除処理 (実際の関数名: deleteInventoryItemCall)
-// 5. 在庫消費・手動削除処理 (仕様書完全準拠・巻き添えバグ対策版)
   const deleteInventoryItemCall = async (id: string) => {
     try {
-      console.log(`在庫削除リクエストを受信しました。対象ID: ${id}`);
-      
-      // 仕様書に準拠するため、在庫の元になっているレシートID（receipt_id）を特定してレシートごと完全に削除します
-      // id が "receipt-123" や "123" などの形式に対応できるようクレンジング
       const cleanReceiptId = id.replace("receipt-", "");
 
       if (!cleanReceiptId || cleanReceiptId.includes("undefined") || cleanReceiptId.length > 15) {
         console.warn("有効なレシートIDが見つからないため、フロントエンドの表示のみを安全に更新します。");
       } else {
-        console.log(`仕様書に基づき、DELETE /receipts/${cleanReceiptId} を実行します...`);
-        
-        // 仕様書にある実在するエンドポイント DELETE /receipts/{receipt_id} を叩く
         const response = await fetch(`${kakeibo_URL}/receipts/${cleanReceiptId}`, {
           method: "DELETE",
         });
@@ -748,12 +529,8 @@ const deleteExpenseCall = async (id: string) => {
         }
       }
 
-      // ★バグ解消の核心
-      // フロント側で独自に inventory.filter などの配列操作をしてStateを壊すのを完全に撤去しました。
-      // 削除が完了したあと、即座にサーバーにある「最新の正しい一覧」を安全に引き直します。
-      // これにより、残っている他の在庫データが巻き添えで消える問題を100%根本から防ぎます。
-      await fetchExpenses();            // 家計簿の履歴データを再同期
-      await fetchInventoryBalances();   // 在庫のデータを再同期
+      await fetchExpenses();            
+      await fetchInventoryBalances();   
 
       alert("在庫を更新しました！");
     } catch (err) {
@@ -761,6 +538,7 @@ const deleteExpenseCall = async (id: string) => {
       alert("サーバーの在庫更新に失敗しました。");
     }
   };
+
   const updateInventoryItem = (id: string, updates: Partial<InventoryItem>) => {
     setInventory(inventory.map((item) => (item.id === id ? { ...item, ...updates } : item)));
   };
@@ -785,7 +563,6 @@ const deleteExpenseCall = async (id: string) => {
 
     try {
       const response = await fetch(`${recipe_URL}/api/v1/recipes/suggest`, {
-      //const response = await fetch(`http://localhost:8080/api/v1/recipes/suggest`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -795,9 +572,6 @@ const deleteExpenseCall = async (id: string) => {
 
       if (!response.ok) throw new Error(`サーバーエラー: ${response.status}`);
       const data = await response.json();
-
-     
-      console.log("レシピ出力:", data);
 
       if (data.recipes && Array.isArray(data.recipes)) {
         const newRecipes: Recipe[] = data.recipes.map((apiRecipe: any, index: number) => ({
@@ -811,8 +585,8 @@ const deleteExpenseCall = async (id: string) => {
           instructions: apiRecipe.steps 
             ? apiRecipe.steps.map((s: any) => `${s.order}. ${s.description}`).join("\n")
             : "手順情報はバックエンドのレスポンスを確認してください。",
-          cookingTime: 20, 
-          estimatedCost: 450 
+          cookingTime: apiRecipe.cookingTime || 20, 
+          estimatedCost: apiRecipe.estimatedCost || 450 
         }));
 
         setRecipes(prev => [...newRecipes, ...prev]);
@@ -826,31 +600,25 @@ const deleteExpenseCall = async (id: string) => {
     }
   };
 
-  // 不足食材の最安店舗・価格見積もりを取得する関数（ステート名・変数名の不整合を完全修正）
   const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
     if (isFetchingPrices) return;
     setIsFetchingPrices(true);
     setShopPrices([]); 
 
     try {
-      // 1. 冷蔵庫にない（要購入）かつ productId が存在する食材を特定
       const missingIngredient = recipe.ingredients.find(ing => !ing.isInFridge && ing.productId);
 
       if (missingIngredient && missingIngredient.productId) {
-        // 2. 仕様書に定義されている「最安購入店舗取得」API（GET /prices/cheapest）へ通信
         const pId = missingIngredient.productId;
-        //const response = await fetch(`http://localhost:8000/prices/cheapest?product_id=${pId}&period_days=90`);
         const response = await fetch(`${kakeibo_URL}/prices/cheapest?product_id=${pId}&period_days=90`);
         
         if (response.ok) {
           const data = await response.json();
 
-          // 過去に購入実績があり、最安店舗データが返ってきた場合
           if (data && data.cheapest) {
             const cheapestInfo = data.cheapest;
             const basePrice = Math.round(cheapestInfo.price_per_base_unit);
 
-            // APIのリアルな最安値データと、それをもとにした他店比較のシミュレーション配列を構築
             const realShopEstimates: ShopPriceEstimate[] = [
               { 
                 shopName: `${cheapestInfo.store_name} (過去最安店)`, 
@@ -874,7 +642,6 @@ const deleteExpenseCall = async (id: string) => {
         }
       }
 
-      // 3. 過去履歴がない(cheapest: null)、または対象食材にproductIdがない場合のフォールバック（テスト用データ）
       const mockShopPrices: ShopPriceEstimate[] = [
         { shopName: "スーパー丸エツ (目安価格)", totalPrice: 320 },
         { shopName: "ライフマート (目安価格)", totalPrice: 350 },
@@ -895,9 +662,7 @@ const deleteExpenseCall = async (id: string) => {
 
   const handleFinalAdd = async (recipe: Recipe) => {
     try {
-      // 1. バックエンドAPI（POST /api/v1/recipes/accept）に在庫消費リクエストを送信
       const acceptResponse = await fetch(`${recipe_URL}/api/v1/recipes/accept`, {
-      //const acceptResponse = await fetch(`http://localhost:8080/api/v1/recipes/accept`, {  
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -910,7 +675,6 @@ const deleteExpenseCall = async (id: string) => {
         console.warn("Recipe-Backでの在庫消費に失敗しました。家計簿の登録のみ続行します。");
       }
 
-      // 2. 家計簿側への支出記録処理（共通関数を利用し再同期）
       await submitReceiptPayload({
         purchased_at: formatToYmdNumber(new Date()),
         store_name: "AIレシピ適応調理",
@@ -941,7 +705,6 @@ const deleteExpenseCall = async (id: string) => {
     }
   };
 
-  // カメラからの読み込み成功コールバックをリフレッシュ（二重登録を防ぎ再読み込みのみを担当）
   const handleCameraCaptureComplete = async () => {
     setShowCamera(false);
     await fetchExpenses();
@@ -949,13 +712,14 @@ const deleteExpenseCall = async (id: string) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
-      <div className="mx-auto max-w-4xl p-4">
+      <div className="mx-auto max-w-7xl p-4">
+        {/* ヘッダー: Appchangeスタイルに「スマート家計簿」名を反映 */}
         <header className="mb-6">
           <div className="flex items-center justify-between">
             <div className="flex-1"></div>
             <div className="flex-1 text-center">
-              <h1 className="mb-2 text-4xl font-bold text-gray-800">💰 家計簿 & レシピ</h1>
-              <p className="text-gray-600">カメラで簡単記録</p>
+              <h1 className="mb-2 text-3xl font-bold text-gray-800">家計簿 & レシピ提案</h1>
+              <p className="text-gray-600">レシートで簡単記録</p>
             </div>
             <div className="flex flex-1 justify-end">
               <button
@@ -971,6 +735,7 @@ const deleteExpenseCall = async (id: string) => {
         </header>
 
         <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="w-full">
+          {/* タブナビゲーション */}
           <Tabs.List className="mb-6 flex gap-2 rounded-lg bg-white p-1 shadow-md">
             <Tabs.Trigger
               value="expenses"
@@ -995,7 +760,8 @@ const deleteExpenseCall = async (id: string) => {
             </Tabs.Trigger>
           </Tabs.List>
 
-          <Tabs.Content value="expenses" className="space-y-4">
+          {/* 1. 家計簿タブ (Appchange準拠の2カラムレイアウト、右側に価格比較を常駐) */}
+          <Tabs.Content value="expenses" className="grid grid-cols-[1fr,380px] gap-4">
             <div className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-2xl font-bold text-gray-800">今月の支出</h2>
@@ -1016,15 +782,18 @@ const deleteExpenseCall = async (id: string) => {
                 </button>
               </div>
 
-              
-              {/* description が "手動在庫追加" のものは家計簿画面から除外して渡す */}
-<ExpenseList 
-  expenses={expenses.filter(e => e.description !== "手動在庫追加")} 
-  onDelete={deleteExpenseCall} 
-/>
+              <ExpenseList 
+                expenses={expenses.filter(e => e.description !== "手動在庫追加")} 
+                onDelete={deleteExpenseCall} 
+              />
+            </div>
+
+            <div className="sticky top-4 max-h-[calc(100vh-6rem)] space-y-4 overflow-y-auto">
+              <PriceComparison expenses={expenses} compact={true} />
             </div>
           </Tabs.Content>
 
+          {/* 2. 在庫タブ */}
           <Tabs.Content value="inventory" className="space-y-4">
             <div className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4 flex items-center justify-between">
@@ -1051,6 +820,7 @@ const deleteExpenseCall = async (id: string) => {
             </div>
           </Tabs.Content>
 
+          {/* 3. レシピタブ */}
           <Tabs.Content value="recipes" className="space-y-4">
             {suggestedRecipes.length > 0 && (
               <div className="rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 p-6 text-white shadow-md">
@@ -1058,10 +828,7 @@ const deleteExpenseCall = async (id: string) => {
                 <p className="mb-3 text-purple-100">在庫の材料で作れる料理があります！</p>
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {suggestedRecipes.map((recipe) => (
-                    <div
-                      key={recipe.id}
-                      className="flex-shrink-0 rounded-lg bg-white/20 px-4 py-2 backdrop-blur"
-                    >
+                    <div key={recipe.id} className="flex-shrink-0 rounded-lg bg-white/20 px-4 py-2 backdrop-blur">
                       <p className="font-medium">{recipe.title}</p>
                       <p className="text-sm text-purple-100">{recipe.cookingTime}分</p>
                     </div>
@@ -1070,6 +837,7 @@ const deleteExpenseCall = async (id: string) => {
               </div>
             )}
  
+            {/* AI提案フォーム (App.tsx実装) */}
             <div className="rounded-lg bg-white p-6 shadow-md border-2 border-purple-400">
               <h2 className="text-2xl font-bold text-gray-800 mb-2 flex items-center gap-2">
                 <span>🤖</span> AIにレシピを相談
@@ -1109,16 +877,18 @@ const deleteExpenseCall = async (id: string) => {
           </Tabs.Content>
         </Tabs.Root>
 
+        {/* フローティングカメラボタン (Appchange仕様の大きさ size-24) */}
         <button
           type="button"
           onClick={() => setShowCamera(true)}
-          className="fixed bottom-8 right-8 flex size-16 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-green-500 text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
+          className="fixed bottom-8 right-8 flex size-24 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-green-500 text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
           aria-label="カメラを開く"
         >
-          <Camera className="size-8" />
+          <Camera className="size-16" />
         </button>
       </div>
 
+      {/* 詳細・適応＆不足材料店舗見積もり用モーダル (App.tsx実装) */}
       {selectedRecipe && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl relative">
@@ -1221,6 +991,7 @@ const deleteExpenseCall = async (id: string) => {
         </div>
       )}
 
+      {/* サブコンポーネント・モーダル群 */}
       {showCamera && (
         <UniversalCamera
           onCapture={handleCameraCaptureComplete}
@@ -1253,12 +1024,22 @@ const deleteExpenseCall = async (id: string) => {
           settings={settings}
           onSave={(newSettings) => {
             setSettings(newSettings);
+            localStorage.setItem('userSettings', JSON.stringify(newSettings));
             setShowSettings(false);
           }}
           onClose={() => {
             if (settings.isSetupComplete) {
               setShowSettings(false);
             }
+          }}
+        />
+      )}
+
+      {showWelcome && (
+        <WelcomeScreen
+          onStart={() => {
+            setShowWelcome(false);
+            setShowSettings(true);
           }}
         />
       )}
