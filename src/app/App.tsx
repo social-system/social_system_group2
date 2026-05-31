@@ -508,7 +508,8 @@ const submitReceiptPayload = async (requestBody: any) => {
   originalItem.category_name === "食費" || 
   item.category_name === "食費" || 
   item.normalized_name === "食費" ||
-  finalStoreName.includes("手動在庫追加"), // 手動在庫追加ルートなら強制的にtruepurchased_quantity: finalQty, 
+  finalStoreName.includes("手動在庫追加"), // 手動在庫追加ルートなら強制的にtrue
+  purchased_quantity: finalQty, 
             purchased_unit: finalUnit,
             unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
             line_total: Number(originalItem.line_total || item.line_total) || 0,
