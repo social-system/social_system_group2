@@ -821,7 +821,7 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
     setShopPrices([]); 
 
     try {
-      // 1. 冷蔵庫にない「要購入」の材料を抽出
+      // 1. 冷蔵庫にない「要購入」の材料をすべて抽出
       const missingIngredients = recipe.ingredients.filter(
         ing => !ing.isInFridge
       );
@@ -838,24 +838,35 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
       let cheapestStoreTotal = 0;
       let fallbackTotal = 0; 
 
-      // 2. 足りない材料すべての価格を計算
+      // 2. 不足している材料ごとに、過去の家計簿履歴からproduct_idを自動検索して最安値を計算
       await Promise.all(
         missingIngredients.map(async (ing) => {
           const neededQty = parseFloat(ing.amount) || 1.00;
           
-          // 💡 【修正のキモ：辞書を使わない自動名前マッチング】
-          // AIからproductIdが来ていない場合、アプリが保持している商品マスター（products）から
-          // 食材名（例:「キャベツ」）が含まれる商品を自動検索してIDを特定します。
+          // AIから最初からproductIdが渡されているかチェック
           let pId = ing.productId && ing.productId > 0 ? ing.productId : null;
           
-          if (!pId && typeof products !== "undefined" && Array.isArray(products)) {
-            // products配列（{ id: number, name: string } のような構造を想定）から検索
-            const matchedProduct = products.find((p: any) => 
-              p && p.name && (ing.name.includes(p.name) || p.name.includes(ing.name))
-            );
-            if (matchedProduct) {
-              pId = matchedProduct.id;
-              console.log(`【品名から自動検索成功】「${ing.name}」を商品リストから「${matchedProduct.name} (ID:${pId})」として特定しました。`);
+          // 💡 【自動品名マッチングロジック】
+          // AIからproductIdが来ていない場合、過去の家計簿履歴（expenses）の全明細アイテムを探索。
+          // 材料名（例:「キャベツ」）が含まれる有効な product_id をリアルタイムに自動特定します。
+          if (!pId && Array.isArray(expenses)) {
+            for (const exp of expenses) {
+              if (exp.items && Array.isArray(exp.items)) {
+                const matchedItem = exp.items.find((item: any) => {
+                  if (!item || !item.product_id) return false;
+                  const name = item.normalized_name || item.raw_name || "";
+                  // 「キャベツ」などの文字が家計簿の品名とお互いに含まれ合っているか部分一致で判定
+                  return ing.name.includes(name) || name.includes(ing.name);
+                });
+                
+                if (matchedItem && matchedItem.product_id) {
+                  pId = Number(matchedItem.product_id);
+                  break; // IDが見つかったら探索を終了
+                }
+              }
+            }
+            if (pId) {
+              console.log(`【品名から家計簿逆引き成功】「${ing.name}」の過去の登録履歴から商品ID:${pId}を特定しました。`);
             }
           }
 
@@ -884,12 +895,12 @@ const handleFetchPurchaseEstimation = async (recipe: Recipe) => {
             }
           }
 
-          // データベースに存在しない新規食材などの場合の目安価格
+          // データベースに存在しない（過去に一度も詳細登録したことがない）新規食材などの目安価格
           fallbackTotal += 300;
         })
       );
 
-      // 3. 計算結果の組み立て
+      // 3. 計算結果の組み立て（最安値店舗1位のみを1行でバシッと表示）
       const finalCheapestStore = cheapestStoreName || "周辺スーパー";
       const finalBasePrice = Math.round(cheapestStoreTotal > 0 ? cheapestStoreTotal : fallbackTotal);
 
