@@ -513,34 +513,39 @@ export default function App() {
     await submitReceiptPayload(requestBody);
   };
 
-  const deleteInventoryItemCall = async (id: string) => {
+const deleteInventoryItemCall = async (id: string) => {
     try {
-      const cleanReceiptId = id.replace("receipt-", "");
+      // 1. まず、渡ってきた ID から不要なプレフィックスを取り除く
+      let cleanId = id.replace("receipt-", "");
 
-//      if (!cleanReceiptId || cleanReceiptId.includes("undefined") || cleanReceiptId.length > 15) {
-//        console.warn("有効なレシートIDが見つからないため、フロントエンドの表示のみを安全に更新します。");
-//      } else {
-//        const response = await fetch(`${kakeibo_URL}/receipts/${cleanReceiptId}`, {
-//          method: "DELETE",
-//        });
+      // 2. 【超重要】もしIDの中にハイフンが含まれている場合（例: "20-test" や "20-26" のような複合キー）
+      // または、何らかの理由で明細IDが渡ってきている可能性があるため、
+      // 現在表示されている inventory 状態から、該当する正しい商品ID（product_id）を逆引きします。
+      const foundItem = inventory.find(item => item.id === id);
+      
+      // 逆引きできたらそれ（本来のproduct_id）を使い、できなければ cleanId をそのまま使う
+      const productIdToDelete = foundItem ? foundItem.id : cleanId;
 
-// ❌ receipts ではなく、⭕️ inventory/balances に対して削除(消費)リクエストを送る
-      const response = await fetch(`${kakeibo_URL}/inventory/balances/${cleanReceiptId}`, {
+      console.log(`削除要求されたフロントID: ${id} -> 送信する商品ID(product_id): ${productIdToDelete}`);
+
+      // 3. 正しい商品IDを指定して在庫残高削除（消費）APIを叩く（例: .../inventory/balances/18）
+      const response = await fetch(`${kakeibo_URL}/inventory/balances/${productIdToDelete}`, {
         method: "DELETE",
       });
 
-        if (!response.ok && response.status !== 404) {
-          throw new Error(`サーバーエラー: ${response.status}`);
-        }
-      //}
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`サーバーエラー: ${response.status} - ${errorText}`);
+      }
 
+      // 4. 成功したら画面を更新
       await fetchExpenses();            
       await fetchInventoryBalances();   
 
-      alert("在庫を更新しました！");
+      alert("在庫を削除しました！");
     } catch (err) {
       console.error("在庫の消費・削除に失敗しました:", err);
-      alert("サーバーの在庫更新に失敗しました。");
+      alert(`在庫の削除に失敗しました:\n${err instanceof Error ? err.message : "通信エラー"}`);
     }
   };
 
