@@ -212,60 +212,66 @@ const handleConfirmCall = async () => {
         throw new Error("サーバーから返ってきた receipt オブジェクトが空です。");
       }
 
-      // 🚨 【422・形式エラー完全撃退ガード】
-      // 元のオブジェクトの参照を切るために、一度ディープクローン（複製）します
-      const cleansedPayload = JSON.parse(JSON.stringify(finalReceiptPayload));
+      // 🚨 【422エラー完全撃破ガード】
+      // バックエンドの型・バリデーション定義（Pydantic仕様）に120%適合させる成形処理
+      const cleansedPayload: any = {
+        store_name: finalReceiptPayload.store_name || "SHOP",
+        total_amount: Number(finalReceiptPayload.total_amount) || Number(extractedData.total_amount) || 0,
+        status: finalReceiptPayload.status || "needs_confirmation",
+        warnings: finalReceiptPayload.warnings || []
+      };
 
-      // 1. 日付フォーマットをサーバーが好む「YYYY-MM-DD」の文字列型に強制変換
-      let finalDateStr = "2025-05-01";
-      const rawDate = String(cleansedPayload.purchased_at || dateStr);
-      if (rawDate.includes("-")) {
-        finalDateStr = rawDate.split('T')[0];
-      } else if (rawDate.length === 8) {
-        finalDateStr = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
+      // ✅ 1. 日付をサーバー仕様通り「ハイフンなしの数値型(int)」に強制変換 (例: 20250501)
+      let finalDateNum = 20260531;
+      const rawDate = String(finalReceiptPayload.purchased_at || dateStr);
+      const digitOnly = rawDate.replace(/[-/T ]/g, '').substring(0, 8);
+      if (digitOnly.length === 8) {
+        finalDateNum = Number(digitOnly);
       }
-      cleansedPayload.purchased_at = finalDateStr;
+      cleansedPayload.purchased_at = finalDateNum;
 
-      // 2. レシート全体の合計金額を確実に数値型にする
-      cleansedPayload.total_amount = Number(cleansedPayload.total_amount) || Number(extractedData.total_amount) || 0;
-
-      // 3. 各明細の「在庫対象判定」と「すべての数値・文字列の型」を完全にクレンジング
-      if (Array.isArray(cleansedPayload.items)) {
-        cleansedPayload.items = cleansedPayload.items.map((item: any) => {
+      // ✅ 2. 各明細の成形：余計なキー（category_name等）を完全削除し、型をクレンジング
+      if (Array.isArray(finalReceiptPayload.items)) {
+        cleansedPayload.items = finalReceiptPayload.items.map((item: any) => {
           const finalCategory = item.category_name || "";
           const finalNormName = item.normalized_name || "";
           
-          // カテゴリー名または正規化名が確実に「食費」である場合のみ true にする
+          // カテゴリー名または正規化名が確実に「食費」である場合のみ在庫連動対象(true)とする
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
+          // ⚠️ サーバーが「Extra inputs are not permitted」で怒るため、
+          // 許可された、かつ必要な項目だけを厳選して新しいオブジェクトを作成します（category_name等は含めない）
           return {
-            // 安全のため既存のフィールドを展開
-            ...item,
-            // カテゴリー名が空欄の場合は「未分類」の文字列をセット
-            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
+            raw_name: item.raw_name || "不明な商品",
+            normalized_name: item.normalized_name || item.raw_name || "不明な商品",
             product_id: isRealFood ? (item.product_id || null) : null,
             category_id: item.category_id || null,
-            is_inventory_target: isRealFood, // 文具などはここで確実に false に固定されます
+            is_inventory_target: isRealFood, // 文具や空カテゴリはここで確実に false に固定！
             
-            // 🚨 【文字列 "1.00" を完全排除】数量・単価・小計を「純粋な数値型」に100%強制キャスト
+            // 数量・単価・小計は確実に「数値型」にキャスト
             purchased_quantity: Number(item.purchased_quantity) || 1, 
+            purchased_unit: item.purchased_unit || "個",
             unit_price: Number(item.unit_price) || 0,
             line_total: Number(item.line_total) || 0,
 
-            // 在庫数量・単位も食費以外なら必ず null に統一
+            // 食費以外なら在庫数量・単位は必ず null に統一
             base_quantity: isRealFood ? (Number(item.base_quantity || item.purchased_quantity) || 1) : null,
-            base_unit: isRealFood ? (item.base_unit || "個") : null
+            base_unit: isRealFood ? (item.base_unit || "個") : null,
+            confidence: Number(item.confidence) || 1.0,
+            warnings: item.warnings || []
           };
         });
+      } else {
+        cleansedPayload.items = [];
       }
 
-      console.log("【2/2】/receipts（本登録）に送信する確定データ(型修正済):", cleansedPayload);
+      console.log("【2/2】/receipts（本登録）に送信する完璧な成形データ:", cleansedPayload);
 
-      // 5. 完全に型が綺麗になった cleansedPayload をそのまま /receipts に POST して保存
+      // 5. 完全にサーバーの要求通りに綺麗になった cleansedPayload を POST して保存
       const response = await fetch(`${kakeibo_URL}/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleansedPayload), // 👈 ここを cleansedPayload に変更
+        body: JSON.stringify(cleansedPayload),
       });
 
       if (!response.ok) {
