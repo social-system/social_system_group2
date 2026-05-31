@@ -69,20 +69,32 @@ export function AddExpenseForm({ onAdd, onClose }: AddExpenseFormProps) {
     setAmount(total > 0 ? total.toString() : '');
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || !description) return;
+
+    const rawDescription = description.trim();
+    const finalStoreName = storeName.trim();
+
+    // 価格比較（PriceComparison）が店舗名を正しく抽出できるように
+    // description を「店舗名での買い物」という形式にする
+    // 店舗名が未入力の場合は、入力された説明（商品名）をそのまま使う
+    const formattedDescription = finalStoreName 
+      ? `${finalStoreName}での買い物` 
+      : rawDescription;
 
     onAdd({
       amount: parseFloat(amount),
       category,
-      description: storeName ? `${storeName}での買い物` : description,
+      description: formattedDescription, // ⭕️ ここで店舗名情報を安全に持たせる
       date: new Date(date),
-      // App.tsxの配列構造に適合させる
+      
+      // ユーザーが「商品追加（任意）」で明細を1件以上入力している場合
       items: items.length > 0 ? items : [
+        // 明細が空（上のフォームだけで登録）の場合のフォールバック
         {
-          raw_name: description,
-          normalized_name: category,
+          raw_name: rawDescription,        // ⭕️ カテゴリ名ではなく、具体的な商品名（例: 豚肉）を入れる
+          normalized_name: rawDescription,  // ⭕️ 価格比較で一致させるために同じ名前を入れる
           product_id: null,
           category_id: null,
           purchased_quantity: 1,
@@ -91,7 +103,7 @@ export function AddExpenseForm({ onAdd, onClose }: AddExpenseFormProps) {
           base_unit: '個',
           unit_price: parseFloat(amount),
           line_total: parseFloat(amount),
-          is_inventory_target: false // 内訳がない場合は単なる支出として処理
+          is_inventory_target: false
         }
       ],
     });
