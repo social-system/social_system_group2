@@ -467,7 +467,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         dateNum = Number(`${y}${m}${day}`);
       }
 
-      // 1. 判定フラグの準備
+      // 1. 食費カテゴリか、および「商品を追加」ボタンから個別詳細が入力されているか判定
       const isFoodCategory = expense.category === "食費";
       const hasSpecificItems = expense.items && expense.items.length > 0;
 
@@ -476,7 +476,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         store_name: (expense.description || "手動登録店舗").trim(),
         total_amount: Number(expense.amount) || 0,
         
-        // 2. フォーム側で「商品を追加」ボタンから個別の明細が入力されている場合
+        // 2. フォーム側で詳細な商品が組み立てられている場合
         items: hasSpecificItems 
           ? expense.items?.map((item) => ({
               raw_name: item.raw_name.trim(),
@@ -489,27 +489,26 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
               base_unit: item.base_unit || "個",
               unit_price: Number(item.unit_price) || Number(expense.amount),
               line_total: Number(item.line_total) || Number(expense.amount),
-              // 食費のときだけ在庫対象（＝価格比較の対象）にする
+              // 食費のときだけ在庫対象・価格比較対象にする
               is_inventory_target: isFoodCategory ? (item.is_inventory_target ?? true) : false
             }))
           // 3. 上部の「説明」欄だけで登録し、個別商品を追加しなかった場合
           : [
               {
-                // 個別商品がない場合は、店舗での買い物という「塊」を raw_name にする
                 raw_name: (expense.description || "手動登録商品").trim(),
-                // API仕様書に基づき、価格比較（/prices/cheapest）の対象外にするため
-                // product_id 未解決状態、かつ normalized_name や base_unit をあえて null または空にする
-                normalized_name: isFoodCategory ? "未分類の食材" : (expense.category || "その他").trim(),
+                // 仕様書の除外ルールを適用するため、商品候補名をダミー文字列に変更
+                normalized_name: isFoodCategory ? "未分類の食材（比較対象外）" : (expense.category || "その他").trim(),
                 product_id: null,  
                 category_id: null, 
                 purchased_quantity: 1,
                 purchased_unit: "個",
-                // 仕様書より：base_quantity が null の明細は最安店舗（価格比較）の対象外になります！
+                // 【超重要】仕様書より「base_quantity / base_unit が null の明細は比較対象外」を満たす
                 base_quantity: null, 
                 base_unit: null, 
                 unit_price: Number(expense.amount) || 0,
                 line_total: Number(expense.amount) || 0,
-                is_inventory_target: false // 個別商品がないなら一律で在庫・比較の対象外にする
+                // 一括の塊なので在庫ターゲットから完全に外す
+                is_inventory_target: false 
               }
             ]
       };
