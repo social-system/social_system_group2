@@ -517,17 +517,22 @@ export default function App() {
     try {
       const cleanReceiptId = id.replace("receipt-", "");
 
-      if (!cleanReceiptId || cleanReceiptId.includes("undefined") || cleanReceiptId.length > 15) {
-        console.warn("有効なレシートIDが見つからないため、フロントエンドの表示のみを安全に更新します。");
-      } else {
-        const response = await fetch(`${kakeibo_URL}/receipts/${cleanReceiptId}`, {
-          method: "DELETE",
-        });
+//      if (!cleanReceiptId || cleanReceiptId.includes("undefined") || cleanReceiptId.length > 15) {
+//        console.warn("有効なレシートIDが見つからないため、フロントエンドの表示のみを安全に更新します。");
+//      } else {
+//        const response = await fetch(`${kakeibo_URL}/receipts/${cleanReceiptId}`, {
+//          method: "DELETE",
+//        });
+
+// ❌ receipts ではなく、⭕️ inventory/balances に対して削除(消費)リクエストを送る
+      const response = await fetch(`${kakeibo_URL}/inventory/balances/${cleanReceiptId}`, {
+        method: "DELETE",
+      });
 
         if (!response.ok && response.status !== 404) {
           throw new Error(`サーバーエラー: ${response.status}`);
         }
-      }
+      //}
 
       await fetchExpenses();            
       await fetchInventoryBalances();   
