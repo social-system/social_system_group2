@@ -212,11 +212,26 @@ const handleConfirmCall = async () => {
         throw new Error("サーバーから返ってきた receipt オブジェクトが空です。");
       }
 
-// 🚨 【超重要・最強の水際フィルター】
-      // 1. サーバーの誤作動（食費以外の在庫化）を完全撃退
-      // 2. 数量や金額を確実に「数値型」に変換して422エラーを徹底防止！
-      if (Array.isArray(finalReceiptPayload.items)) {
-        finalReceiptPayload.items = finalReceiptPayload.items.map((item: any) => {
+      // 🚨 【422・形式エラー完全撃退ガード】
+      // 元のオブジェクトの参照を切るために、一度ディープクローン（複製）します
+      const cleansedPayload = JSON.parse(JSON.stringify(finalReceiptPayload));
+
+      // 1. 日付フォーマットをサーバーが好む「YYYY-MM-DD」の文字列型に強制変換
+      let finalDateStr = "2025-05-01";
+      const rawDate = String(cleansedPayload.purchased_at || dateStr);
+      if (rawDate.includes("-")) {
+        finalDateStr = rawDate.split('T')[0];
+      } else if (rawDate.length === 8) {
+        finalDateStr = `${rawDate.substring(0, 4)}-${rawDate.substring(4, 6)}-${rawDate.substring(6, 8)}`;
+      }
+      cleansedPayload.purchased_at = finalDateStr;
+
+      // 2. レシート全体の合計金額を確実に数値型にする
+      cleansedPayload.total_amount = Number(cleansedPayload.total_amount) || Number(extractedData.total_amount) || 0;
+
+      // 3. 各明細の「在庫対象判定」と「すべての数値・文字列の型」を完全にクレンジング
+      if (Array.isArray(cleansedPayload.items)) {
+        cleansedPayload.items = cleansedPayload.items.map((item: any) => {
           const finalCategory = item.category_name || "";
           const finalNormName = item.normalized_name || "";
           
@@ -224,13 +239,15 @@ const handleConfirmCall = async () => {
           const isRealFood = finalCategory === "食費" || finalNormName === "食費";
 
           return {
+            // 安全のため既存のフィールドを展開
             ...item,
-            // 📝 文字列すり抜け防止ガード（空なら未分類に）
+            // カテゴリー名が空欄の場合は「未分類」の文字列をセット
             category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "未分類",
             product_id: isRealFood ? (item.product_id || null) : null,
-            is_inventory_target: isRealFood,
+            category_id: item.category_id || null,
+            is_inventory_target: isRealFood, // 文具などはここで確実に false に固定されます
             
-            // 🚨 【422エラー対策】すべての数値項目を強制的に「数値型(Number)」へ変換・クレンジング！
+            // 🚨 【文字列 "1.00" を完全排除】数量・単価・小計を「純粋な数値型」に100%強制キャスト
             purchased_quantity: Number(item.purchased_quantity) || 1, 
             unit_price: Number(item.unit_price) || 0,
             line_total: Number(item.line_total) || 0,
@@ -242,16 +259,13 @@ const handleConfirmCall = async () => {
         });
       }
 
-      // レシート全体の合計金額も確実に数値型にする
-      finalReceiptPayload.total_amount = Number(finalReceiptPayload.total_amount) || Number(extractedData.total_amount) || 0;
+      console.log("【2/2】/receipts（本登録）に送信する確定データ(型修正済):", cleansedPayload);
 
-      console.log("【2/2】/receipts（本登録）に送信する確定データ:", finalReceiptPayload);
-
-      // 5. 完成したオブジェクトをそのまま /receipts に POST して保存
+      // 5. 完全に型が綺麗になった cleansedPayload をそのまま /receipts に POST して保存
       const response = await fetch(`${kakeibo_URL}/receipts`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(finalReceiptPayload),
+        body: JSON.stringify(cleansedPayload), // 👈 ここを cleansedPayload に変更
       });
 
       if (!response.ok) {
@@ -264,7 +278,7 @@ const handleConfirmCall = async () => {
       const createdId = resData.id || resData.receipt_id || 'success';
       alert(`確定レシートと家計簿の同期登録を完了しました！ (レシートID: ${createdId})`);
 
-      onCapture(); // App.tsx 側の最新データ再取得をトリガー
+      onCapture(); 
       stopCamera();
     } catch (err) {
       console.error("登録プロセス全体で失敗:", err);
