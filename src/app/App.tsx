@@ -707,7 +707,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
     setRecipes(recipes.filter((r) => r.id !== id));
   };
 
-  const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
+const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
     const requestBody = {
       purchased_at: formatToYmdNumber(new Date()),
       store_name: "手動在庫追加",
@@ -716,8 +716,8 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         {
           raw_name: item.name,
           normalized_name: item.name,
-          product_id: 1,
-          category_id: 1,
+          product_id: null, // 💡 1 から null に変更して、サーバー側の誤作動を防ぐ
+          category_id: null, // 💡 1 から null に変更して、サーバー側の誤作動を防ぐ
           purchased_quantity: Number(item.quantity),
           purchased_unit: item.unit || "個",
           base_quantity: Number(item.quantity),
