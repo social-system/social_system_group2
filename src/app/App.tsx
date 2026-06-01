@@ -48,6 +48,24 @@ interface RecipeListProps {
   inventory: InventoryItem[];
   onSelectRecipe: (recipe: Recipe) => void;
 }
+// サーバーから取得した常備調味料（condiments）を保持するState
+const [serverCondiments, setServerCondiments] = useState<string[]>([]);
+
+// ユーザー設定（常備調味料）を取得する関数
+const fetchUserPreferences = async () => {
+  try {
+    const response = await fetch(`${recipe_URL}/api/v1/preferences`);
+    if (response.ok) {
+      const data = await response.json();
+      // APIレスポンスの condiments (配列) をセット
+      setServerCondiments(data.condiments || []);
+    }
+  } catch (error) {
+    console.error("ユーザー設定の取得に失敗しました:", error);
+  }
+};
+
+
 
 export const RecipeListCall = ({ recipes, onDelete, inventory, onSelectRecipe }: RecipeListProps) => {
   return (
@@ -171,6 +189,8 @@ export default function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
+  const [serverCondiments, setServerCondiments] = useState<string[]>([]);
+
   const [showCamera, setShowCamera] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
   const [showAddInventory, setShowAddInventory] = useState(false);
@@ -217,7 +237,22 @@ export default function App() {
     }
     fetchExpenses();
     fetchInventoryBalances();
+    fetchUserPreferences();
   }, []);
+
+// ★追加: ユーザー設定（常備調味料）をサーバーから取得する関数
+  const fetchUserPreferences = async () => {
+    try {
+      const res = await fetch(`${recipe_URL}/api/v1/preferences`);
+      if (res.ok) {
+        const data = await res.json();
+        // APIレスポンスの condiments 配列をセット
+        setServerCondiments(data.condiments || []);
+      }
+    } catch (error) {
+      console.error("ユーザー設定の取得に失敗しました:", error);
+    }
+  };
 
   // API連動関数 (App.tsx準拠)
   const fetchInventoryBalances = async () => {
@@ -270,6 +305,7 @@ const saveUserSettingsCall = async (newSettings: UserSettings) => {
 
     const data = await response.json();
     console.log("サーバーへの設定保存に成功しました:", data);
+    setServerCondiments(newSettings.staples);
   } catch (error: any) {
     console.error("ユーザー設定の保存エラー:", error);
     alert(`サーバーへの保存に失敗しました: ${error.message}`);
@@ -855,8 +891,26 @@ const deleteInventoryItemCall = async (id: string) => {
 
   const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
-  const getSuggestedRecipes = () => {
+  // ★追加: 現在保持している全レシピに対し、常備調味料を考慮して isInFridge を最新に補正する配列を作成
+  const processedRecipes = recipes.map((recipe) => ({
+    ...recipe,
+    ingredients: recipe.ingredients?.map((ing) => ({
+      ...ing,
+      // 本来の在庫判定が false でも、常備調味料に含まれていれば true にする
+      isInFridge: ing.isInFridge || serverCondiments.includes(ing.name)
+    })) || []
+  }));
+
+  const getSuggestedRecipesOLD = () => {
     return recipes.filter((recipe) => {
+      const missingCount = recipe.ingredients?.filter(i => !i.isInFridge).length || 0;
+      return missingCount === 0;
+    });
+  };
+
+  // ★変更: recipes の代わりに processedRecipes を使用して今作れるレシピを判定
+  const getSuggestedRecipes = () => {
+    return processedRecipes.filter((recipe) => {
       const missingCount = recipe.ingredients?.filter(i => !i.isInFridge).length || 0;
       return missingCount === 0;
     });
@@ -890,7 +944,12 @@ const deleteInventoryItemCall = async (id: string) => {
           url: apiRecipe.url,
           description: apiRecipe.description,
           matchScore: apiRecipe.matchScore,
-          ingredients: apiRecipe.ingredients || [],
+ingredients: Array.isArray(apiRecipe.ingredients) 
+            ? apiRecipe.ingredients.map((ing: any) => ({
+                ...ing,
+                isInFridge: ing.isInFridge || serverCondiments.includes(ing.name)
+              }))
+            : [],
           steps: apiRecipe.steps || [],
           instructions: apiRecipe.steps 
             ? apiRecipe.steps.map((s: any) => `${s.order}. ${s.description}`).join("\n")
@@ -1266,7 +1325,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
               </div>
 
               <RecipeListCall 
-                recipes={recipes} 
+                recipes={processedRecipes} 
                 onDelete={deleteRecipe} 
                 inventory={inventory} 
                 onSelectRecipe={(recipe) => setSelectedRecipe(recipe)}
@@ -1298,33 +1357,66 @@ const handleFinalAdd = async (recipe: Recipe) => {
               <X className="size-5" />
             </button>
             
-            <h3 className="text-2xl font-bold text-gray-800 mb-1">{selectedRecipe.title}</h3>
-            {selectedRecipe.url && (
-              <a href={selectedRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
-                クックパッドで元レシピを見る ↗
-              </a>
-            )}
-            
-            <p className="text-purple-600 font-semibold mb-4">
-              ⏱ 調理時間: {selectedRecipe.cookingTime}分 
-              {selectedRecipe.estimatedCost && ` / 💰 目安: ¥${selectedRecipe.estimatedCost}`}
-            </p>
-            
-            <div className="mb-4">
-              <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
-              <ul className="space-y-1">
-                {selectedRecipe.ingredients?.map((ing, idx) => (
-                  <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
-                    <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
-                    {ing.isInFridge ? (
-                      <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
-                    ) : (
-                      <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
+{(() => {
+              // ★補正処理: selectedRecipe を現在最新の serverCondiments を反映したオブジェクトに差し替える
+              const currentRecipe = processedRecipes.find(r => r.id === selectedRecipe.id) || selectedRecipe;
+
+              return (
+                <>
+                  <h3 className="text-2xl font-bold text-gray-800 mb-1">{currentRecipe.title}</h3>
+                  {currentRecipe.url && (
+                    <a href={currentRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
+                      クックパッドで元レシピを見る ↗
+                    </a>
+                  )}
+                  
+                  <p className="text-purple-600 font-semibold mb-4">
+                    ⏱ 調理時間: {currentRecipe.cookingTime}分 
+                    {currentRecipe.estimatedCost && ` / 💰 目安: ¥${currentRecipe.estimatedCost}`}
+                  </p>
+                  
+                  <div className="mb-4">
+                    <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
+                    <ul className="space-y-1">
+                      {currentRecipe.ingredients?.map((ing, idx) => (
+                        <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
+                          <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
+                          {/* ★ 補正された isInFridge が使われるため、「冷蔵庫あり」に切り替わります */}
+                          {ing.isInFridge ? (
+                            <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* 中略: shopPrices や作り方手順などの既存のUI要素 */}
+                  
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      // ★ 変更: 引数も currentRecipe に変更して「要購入店舗の算出」の計算を狂わせないようにします
+                      onClick={() => handleFetchPurchaseEstimation(currentRecipe)}
+                      disabled={isFetchingPrices}
+                      className="flex-1 flex items-center justify-center gap-1 bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md hover:bg-amber-600 transition-all active:scale-95 disabled:bg-amber-300 disabled:cursor-not-allowed"
+                    >
+                      {isFetchingPrices ? <Loader2 className="size-5 animate-spin" /> : <ShoppingCart className="size-5" />}
+                      {isFetchingPrices ? "価格を取得中..." : "足りない材料を購入"}
+                    </button>
+                    <button
+                      type="button"
+                      // ★ 変更: 適応ボタン時にも上書き済みのデータを渡します
+                      onClick={() => handleFinalAdd(currentRecipe)}
+                      className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all"
+                    >
+                      このレシピを適応する
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
 
 {shopPrices.length > 0 && (
               <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200">
@@ -1451,9 +1543,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
         />
       )}
 
-// ==========================================
-// 2. SettingsModal の呼び出し部分（JSX）を修正
-// ==========================================
+
 {showSettings && (
   <SettingsModal
     settings={settings}
