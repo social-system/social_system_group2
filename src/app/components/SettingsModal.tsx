@@ -80,7 +80,7 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
     }
   };
 
-  const handleSave = () => {
+  const handleSaveOld = () => {
     onSave({
       staples: selectedStaples,
       likedIngredients,
@@ -88,6 +88,19 @@ export function SettingsModal({ settings, onSave, onClose }: SettingsModalProps)
       isSetupComplete: true,
     });
   };
+  const handleSave = () => {
+  // 現在の入力・選択状態を1つのオブジェクトにまとめる
+  const updatedSettings: UserSettings = {
+    ...settings, // 既存の設定値をベースにする
+    staples: selectedStaples,            // ★最新の常備調味料配列
+    likedIngredients: likedIngredients,  // 最新のお気に入り配列
+    dislikedIngredients: dislikedIngredients, // 最新の苦手配列
+    isSetupComplete: true,               // セットアップ完了フラグ
+  };
+
+  // 親（App.tsx）の onSave 関数を呼び出す
+  onSave(updatedSettings);
+};
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4 overflow-y-auto">

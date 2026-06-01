@@ -243,6 +243,38 @@ export default function App() {
       setInventory([]);
     }
   };
+// ==========================================
+// 1. API呼び出し関数を App.tsx 内に追加
+// ==========================================
+const saveUserSettingsCall = async (newSettings: UserSettings) => {
+  try {
+    // 仕様書に合わせ、接続先URLとパスを設定（URL定義に合わせて調整してください）
+    const response = await fetch(`${recipe_URL}/api/v1/preferences`, {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        // フロントの staples を バックエンドの condiments にマッピング
+        condiments: newSettings.staples,
+        // 好みや苦手な食材の配列をテキストにまとめて personalNotes に入れる例
+        personalNotes: `お気に入り: ${newSettings.likedIngredients.join(", ")} / 苦手: ${newSettings.dislikedIngredients.join(", ")}`,
+      }),
+    });
+
+    if (!response.ok) {
+      // 422 などのエラーハンドリング
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.details || "設定の保存に失敗しました");
+    }
+
+    const data = await response.json();
+    console.log("サーバーへの設定保存に成功しました:", data);
+  } catch (error: any) {
+    console.error("ユーザー設定の保存エラー:", error);
+    alert(`サーバーへの保存に失敗しました: ${error.message}`);
+  }
+};
 
 const syncInventoryFromExpenses = (allExpenses: Expense[]) => {
     const newInventory: InventoryItem[] = [];
@@ -1419,21 +1451,30 @@ const handleFinalAdd = async (recipe: Recipe) => {
         />
       )}
 
-      {showSettings && (
-        <SettingsModal
-          settings={settings}
-          onSave={(newSettings) => {
-            setSettings(newSettings);
-            localStorage.setItem('userSettings', JSON.stringify(newSettings));
-            setShowSettings(false);
-          }}
-          onClose={() => {
-            if (settings.isSetupComplete) {
-              setShowSettings(false);
-            }
-          }}
-        />
-      )}
+// ==========================================
+// 2. SettingsModal の呼び出し部分（JSX）を修正
+// ==========================================
+{showSettings && (
+  <SettingsModal
+    settings={settings}
+    onSave={async (newSettings) => {
+      // ① 画面（State）の更新
+      setSettings(newSettings);
+      // ② ローカルストレージへの永続化
+      localStorage.setItem('userSettings', JSON.stringify(newSettings));
+      
+      // ③ ★追加: サーバー（データベース）への同期実行
+      await saveUserSettingsCall(newSettings);
+      
+      setShowSettings(false);
+    }}
+    onClose={() => {
+      if (settings.isSetupComplete) {
+        setShowSettings(false);
+      }
+    }}
+  />
+)}
 
       {showWelcome && (
         <WelcomeScreen
