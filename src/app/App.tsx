@@ -628,14 +628,29 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
           if (!response.ok) throw new Error(`確定登録エラー: ${response.status}`);
         }
 
-      } else {
+ } else {
         // --- パターンB: 詳細な商品は入力せず、一括金額だけで登録した場合 ---
-        // 💡 フォームがお節介で入れてきた「あ」を完全に消去し、空配列 `[]` で送信します！
+        // 💡 バックエンドの「最低1件」の縛りを突破しつつ、絶対に在庫化させないダミーを送信します！
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr,
           total_amount: totalAmountNum,
-          items: [] 
+          items: [
+            {
+              // 💡 バックエンドが「手動一括のダミー」と一目で判断できる名前に固定します
+              raw_name: `手動一括（${expense.category || "その他"}）`, 
+              normalized_name: "詳細未入力の支出",
+              product_id: null,  
+              category_id: null,     
+              purchased_quantity: 1,
+              purchased_unit: "個",
+              base_quantity: null, 
+              base_unit: null,     
+              unit_price: totalAmountNum,
+              line_total: totalAmountNum,
+              is_inventory_target: false // 👈 ここを確実に false に！
+            }
+          ]
         };
 
         const response = await fetch(`${kakeibo_URL}/receipts`, {  
