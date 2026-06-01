@@ -524,8 +524,6 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       const isFoodCategory = expense.category === "食費";
       
-      // 💡 【ポイント】店名の頭に自動で【手動】という目印を付与します。
-      // これにより、バックエンドの規約を汚さず、一覧表示の時に手動データだと見分けられます。
       const rawStoreName = (expense.description || "").trim() || "手動登録店舗";
       const storeNameStr = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
 
@@ -534,7 +532,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
         : [];
 
-      // 全カテゴリ共通・一括登録判定
+      // 一括登録（詳細商品なし）の判定
       let isBulkRegistration = false;
       if (validItems.length === 0) {
         isBulkRegistration = true;
@@ -584,7 +582,6 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         const finalizedReceipt = prepareData.receipt;
 
         if (finalizedReceipt) {
-          // 🚨 【修正】extra_forbidden を回避するため、is_manual や source_type を完全削除！
           const cleansedPayload: any = {
             store_name: storeNameStr, 
             purchased_at: dateNum,
@@ -618,26 +615,12 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       } else {
         // --- パターンB: 詳細な商品は入力せず、一括金額だけで登録した場合 ---
-        // 🚨 【修正】ここからも extra_forbidden の原因だったフィールドを削除
+        // 💡 【修正】ダミー明細の生成をやめ、items を完全な空配列にします
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr,
           total_amount: Number(expense.amount) || 0,
-          items: [
-            {
-              raw_name: `手動一括（${expense.category || "その他"}）`,
-              normalized_name: "詳細未入力の支出",
-              product_id: null,  
-              category_id: null, 
-              purchased_quantity: 1,
-              purchased_unit: "個",
-              base_quantity: null, 
-              base_unit: null,     
-              unit_price: Number(expense.amount) || 0,
-              line_total: Number(expense.amount) || 0,
-              is_inventory_target: false // 在庫管理には入らない（消費された状態）
-            }
-          ]
+          items: [] // 👈 ここを空っぽにすることで、バックエンドが在庫化（自動マスタ生成）するのを完全に防ぎます
         };
 
         const response = await fetch(`${kakeibo_URL}/receipts`, {  
@@ -650,6 +633,9 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       }
 
       await fetchExpenses(); 
+      // 💡 もし「レシート登録時に自動で在庫へ反映するAPI（/apply）」を別途仕込んでいる場合は、
+      // ここで一括登録（isBulkRegistration === true）のときはそれを呼ばないように制御するとさらに安全です。
+
       alert("家計簿にデータを登録しました！");
     } catch (err) {
       console.error("手動家計簿の送信に失敗しました:", err);
