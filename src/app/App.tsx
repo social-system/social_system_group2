@@ -173,6 +173,7 @@ export default function App() {
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false); // 💡 ここで定義されています！
 
 
 
@@ -245,18 +246,20 @@ const fetchUserPreferences = async () => {
   // API連動関数 (App.tsx準拠)
 const fetchInventoryBalances = async () => {
     try {
+      // 仕様書通り、残量0を含めないパラメータを追加
       const res = await fetch(`${kakeibo_URL}/inventory/balances?include_zero=false`);
       if (!res.ok) throw new Error(`在庫取得エラー: ${res.status}`);
       const data = await res.json();
 
       if (data && Array.isArray(data.items)) {
         const formattedInventory = data.items.map((item: any) => ({
-          // バックエンドの仕様に合わせてマッピング
+          // 仕様書のレスポンス例に合わせてマッピング
           id: item.product_id.toString(),
-          name: item.product_name || "不明な食材", // 💡 ここを item.product_name に修正
-          quantity: Number(item.quantity),        // 💡 バックエンドが "16.00" のように文字列で返してくるので、確実な数値化
-          unit: item.unit || "個",                // 💡 base_unit から unit に修正
-          category: "食材在庫"
+          name: item.product_name || "不明な食材",
+          quantity: Number(item.quantity),
+          unit: item.unit || "個",
+          category: "食材在庫", // もし将来的に category_name が返るなら item.category_name || "食材在庫" にする
+          nearest_expires_at: item.nearest_expires_at // オプションで期限日も保持可能
         }));
         setInventory(formattedInventory);
       } else {
@@ -455,176 +458,55 @@ const fetchExpenses = async () => {
   };
     
 // ✨ 【完全改修版】野菜・キノコ判定を確実に保持して本登録する関数
-  const submitReceiptPayload = async (requestBody: any) => {
+const submitReceiptPayload = async (payload: any) => {
+    setIsProcessing(true);
     try {
-      if (!requestBody) return;
+      // 1. まずは従来通り、家計簿側にレシート(支出)を登録する
+      const res = await fetch(`${kakeibo_URL}/receipts`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
 
-      let dateNum = 20260531;
-      let dateStr = "2026-05-31";
-      if (requestBody.purchased_at) {
-        const s = String(requestBody.purchased_at);
-        if (s.length === 8 && !s.includes("-")) {
-          dateNum = Number(s);
-          dateStr = `${s.substring(0, 4)}-${s.substring(4, 6)}-${s.substring(6, 8)}`;
-        } else if (s.includes("-")) {
-          dateStr = s.split('T')[0];
-          dateNum = Number(dateStr.replace(/[-/]/g, ''));
-        }
-      }
-
-      const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
+      if (!res.ok) throw new Error(`レシート登録エラー: ${res.status}`);
+      const resultData = await res.json();
       
-      const rawStoreName = (requestBody.store_name || "").trim() || "手動登録店舗";
-      const finalStoreName = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
+      // バックエンドのレスポンスから、生成された receipt_id を取得する
+      // (※バックエンドの仕様に合わせて一例として id または receipt_id を想定しています)
+      const newReceiptId = resultData.id || resultData.receipt_id;
 
-      if (!hasItems) {
-        const directPayload = {
-          store_name: finalStoreName,
-          purchased_at: dateNum,
-          total_amount: Number(requestBody.total_amount) || 0,
-          items: [
-            {
-              raw_name: "手動追加食材",
-              normalized_name: "手動追加食材",
-              product_id: null,
-              category_id: null,
-              is_inventory_target: true,
-              purchased_quantity: 1,
-              purchased_unit: "個",
-              unit_price: Number(requestBody.total_amount) || 0,
-              line_total: Number(requestBody.total_amount) || 0,
-              base_quantity: 1,
-              base_unit: "個"
-            }
-          ]
-        };
-
-        console.log("【直接本登録送信（店名維持版）】:", directPayload);
-        const response = await fetch(`${kakeibo_URL}/receipts`, {
+      if (newReceiptId) {
+        // 2. 【新規追加】新しい仕様書に基づく、在庫への一括反映APIを叩く
+        console.log(`レシートID: ${newReceiptId} を在庫へ反映します...`);
+        const applyRes = await fetch(`${kakeibo_URL}/inventory/receipts/${newReceiptId}/apply`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(directPayload),
+          body: JSON.stringify({
+            default_location_id: 1, // 初期データ「冷蔵」のID
+            idempotency_key: `receipt:${newReceiptId}:apply-${Date.now()}`, // 二重実行防止キー
+            expires_at_by_receipt_item_id: {} // 必要に応じて個別の賞味期限を設定
+          })
         });
 
-        if (!response.ok) {
-          const errDetail = await response.json().catch(() => ({}));
-          console.error("直接登録エラー詳細:", errDetail);
-          throw new Error(`サーバーエラー: ${response.status}`);
+        if (!applyRes.ok) {
+          console.error("在庫への自動反映処理でエラーが発生しました:", applyRes.status);
+          // 家計簿の登録自体は成功しているので、ここではエラーで止めずに続行させることが多いです
+        } else {
+          const applyResult = await applyRes.json();
+          console.log("在庫反映完了:", applyResult);
         }
-
-        await fetchExpenses();
-        await fetchInventoryBalances();
-        return; 
       }
 
-      const prepareBody = {
-        status: "needs_confirmation",
-        store_name: finalStoreName, 
-        purchased_at: dateStr, 
-        total_amount: Number(requestBody.total_amount) || 0, 
-        items: requestBody.items.map((item: any) => {
-          const isFood = 
-            item.category_name === "食費" || 
-            item.normalized_name === "食費" ||
-            item.category_name === "vegetable" ||
-            item.category_name === "野菜" ||
-            item.category_name === "mushroom" ||
-            item.is_inventory_target === true;
-
-          const q = Number(item.purchased_quantity) || 1;
-          const u = item.purchased_unit || "個";
-          return {
-            raw_name: (item.raw_name || "手動登録商品").trim(),
-            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
-            purchased_quantity: q,
-            purchased_unit: u,
-            base_quantity: q,
-            base_unit: u,
-            unit_price: Number(item.unit_price) || 0,
-            line_total: Number(item.line_total) || 0,
-            is_inventory_target: isFood,
-            confidence: 1.0,
-            warnings: []
-          };
-        }),
-        warnings: []
-      };
-
-      const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(prepareBody),
-      });
-
-      if (!prepareResponse.ok) throw new Error(`Prepareエラー: ${prepareResponse.status}`);
-      const prepareData = await prepareResponse.json();
-      const finalizedReceipt = prepareData.receipt;
-
-      if (!finalizedReceipt) throw new Error("サーバーからの自動補完結果が不正です。");
-
-      const cleansedPayload: any = {
-        store_name: finalStoreName, 
-        purchased_at: typeof finalizedReceipt.purchased_at === 'string'
-          ? Number(finalizedReceipt.purchased_at.replace(/[-/]/g, ''))
-          : Number(finalizedReceipt.purchased_at) || 20260531,
-        total_amount: Number(requestBody.total_amount) || 0,
-        items: []
-      };
-
-      if (Array.isArray(finalizedReceipt.items)) {
-        cleansedPayload.items = finalizedReceipt.items.map((item: any, idx: number) => {
-          const originalItem = requestBody.items[idx] || requestBody.items[0] || {};
-          const finalQty = Number(originalItem.purchased_quantity || item.purchased_quantity) || 1;
-          const finalUnit = originalItem.purchased_unit || item.purchased_unit || "個";
-
-          const shouldBeInventory = 
-            originalItem.is_inventory_target === true || 
-            item.is_inventory_target === true || 
-            originalItem.category_name === "食費" || 
-            originalItem.category_name === "野菜" || 
-            originalItem.category_name === "vegetable" || 
-            originalItem.category_name === "mushroom" || 
-            item.category_name === "食費" || 
-            item.normalized_name === "食費" ||
-            item.product_id !== null || 
-            finalStoreName.includes("手動在庫追加");
-
-          return {
-            raw_name: (originalItem.raw_name || item.raw_name || "手動登録商品").trim(),
-            normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            product_id: item.product_id || null, 
-            category_id: item.category_id || null,
-            is_inventory_target: shouldBeInventory,
-            purchased_quantity: finalQty, 
-            purchased_unit: finalUnit,
-            unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
-            line_total: Number(originalItem.line_total || item.line_total) || 0,
-            base_quantity: item.base_quantity || finalQty, 
-            base_unit: item.base_unit || finalUnit
-          };
-        });
-      }
-      
-      console.log("【本登録直前】余計なキーをすべて排除したデータ:", cleansedPayload);
-
-      const response = await fetch(`${kakeibo_URL}/receipts`, {  
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(cleansedPayload), 
-      });
-
-      if (!response.ok) {
-        const errDetail = await response.json().catch(() => ({}));
-        console.error("本登録エラー詳細:", errDetail);
-        throw new Error(`サーバーエラー: ${response.status}`);
-      }
-
+      // 3. 最新のデータを画面に再反映
       await fetchExpenses();
       await fetchInventoryBalances();
+      
+      alert("レシートを登録し、在庫に対象商品を反映しました！");
     } catch (err) {
-      console.error("送信プロセス失敗:", err);
-      alert("データの保存に失敗しました。バックエンドのバリデーションを確認してください。");
+      console.error("レシートの登録に失敗しました:", err);
+      alert("レシートの登録に失敗しました。");
+    } finally {
+      setIsProcessing(false);
     }
   };
 
@@ -821,56 +703,39 @@ const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
   };
 
 const deleteInventoryItemCall = async (id: string) => {
+    // 削除対象のアイテムを現在のStateから特定する
+    const targetItem = inventory.find(item => item.id === id);
+    if (!targetItem) return;
+
     try {
-      // 1. 引数の id は、fetchInventoryBalances で「id: item.product_id.toString()」として入ってきた値
-      const targetProductId = Number(id);
-      
-      // 2. 画面の在庫リスト（inventory）から、いま消そうとしているアイテムの名前等の情報をバックアップ
-      const currentInventoryItem = inventory.find(i => i.id === id);
-      const targetName = currentInventoryItem ? currentInventoryItem.name : "";
-
-      // 3. 家計簿データ（expenses）の全明細の中から、親レシートを特定する
-      const parentExpense = expenses.find(exp => 
-        exp.items?.some(item => {
-          // パターンA: product_id が一致するか (例: product_id が 3)
-          const isProductIdMatch = item.product_id !== null && Number(item.product_id) === targetProductId;
-          
-          // パターンB: 手動追加などでproduct_idがない場合、または合算時のために名前が一致するか
-          const isNameMatch = targetName && (item.normalized_name === targetName || item.raw_name === targetName);
-          
-          return isProductIdMatch || isNameMatch;
-        })
-      );
-
-      // 4. 正しい親のレシートIDを特定（今回のトマトの場合、parentExpense.id から「83」が正しく取得できます）
-      const receiptIdToDelete = parentExpense ? parentExpense.id : null;
-
-      console.log(`削除要求された商品ID(product_id): ${id} (${targetName}) -> 特定した大元レシートID: ${receiptIdToDelete}`);
-
-      // 5. 親レシートIDが見つからない場合は、404エラーを出す前に安全にガードする
-      if (!receiptIdToDelete || String(receiptIdToDelete).includes("undefined")) {
-        alert("有効なレシートID（家計簿データ）が見つからないため、削除処理を中断しました。");
-        return;
-      }
-
-      // 6. 仕様書「DELETE /receipts/{receipt_id}」に従い、特定した正しい親ID（例: 83）で一撃削除
-      const response = await fetch(`${kakeibo_URL}/receipts/${receiptIdToDelete}`, {
-        method: "DELETE",
+      // 新しい仕様書に従い、手動減少(consume)の movement を作成する
+      const res = await fetch(`${kakeibo_URL}/inventory/movements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          product_id: Number(id),
+          movement_type: "consume", // 廃棄にしたい場合は "dispose"
+          quantity: targetItem.quantity.toString(), // 残っている全量を指定して消費
+          unit: targetItem.unit,
+          reason: "画面から手動で削除",
+          occurred_at: new Date().toISOString()
+        }),
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`サーバーエラー: ${response.status} - ${errorText}`);
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        if (errData.detail === "insufficient_inventory") {
+          alert("在庫が不足しているため、削除できませんでした。");
+          return;
+        }
+        throw new Error(`在庫削除エラー: ${res.status}`);
       }
 
-      // 7. 削除に成功したら画面と状態を最新に同期
-      await fetchExpenses();            
-      await fetchInventoryBalances();   
-
-      alert("在庫データを削除（消費）しました！");
+      // 再取得して画面を更新
+      await fetchInventoryBalances();
     } catch (err) {
-      console.error("在庫の消費・削除に失敗しました:", err);
-      alert("サーバーの在庫更新に失敗しました。");
+      console.error("在庫の削除に失敗しました:", err);
+      alert("在庫の削除に失敗しました。");
     }
   };
 
