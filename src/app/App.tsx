@@ -48,22 +48,7 @@ interface RecipeListProps {
   inventory: InventoryItem[];
   onSelectRecipe: (recipe: Recipe) => void;
 }
-// サーバーから取得した常備調味料（condiments）を保持するState
-const [serverCondiments, setServerCondiments] = useState<string[]>([]);
 
-// ユーザー設定（常備調味料）を取得する関数
-const fetchUserPreferences = async () => {
-  try {
-    const response = await fetch(`${recipe_URL}/api/v1/preferences`);
-    if (response.ok) {
-      const data = await response.json();
-      // APIレスポンスの condiments (配列) をセット
-      setServerCondiments(data.condiments || []);
-    }
-  } catch (error) {
-    console.error("ユーザー設定の取得に失敗しました:", error);
-  }
-};
 
 
 
@@ -189,7 +174,7 @@ export default function App() {
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [inventory, setInventory] = useState<InventoryItem[]>([]);
 
-  const [serverCondiments, setServerCondiments] = useState<string[]>([]);
+
 
   const [showCamera, setShowCamera] = useState(false);
   const [showAddExpense, setShowAddExpense] = useState(false);
@@ -211,7 +196,22 @@ export default function App() {
 
   const [shopPrices, setShopPrices] = useState<ShopPriceEstimate[]>([]);
   const [isFetchingPrices, setIsFetchingPrices] = useState(false);
+// サーバーから取得した常備調味料（condiments）を保持するState
+const [serverCondiments, setServerCondiments] = useState<string[]>([]);
 
+// ユーザー設定（常備調味料）を取得する関数
+const fetchUserPreferences = async () => {
+  try {
+    const response = await fetch(`${recipe_URL}/api/v1/preferences`);
+    if (response.ok) {
+      const data = await response.json();
+      // APIレスポンスの condiments (配列) をセット
+      setServerCondiments(data.condiments || []);
+    }
+  } catch (error) {
+    console.error("ユーザー設定の取得に失敗しました:", error);
+  }
+};
   const handleCloseModal = () => {
     setSelectedRecipe(null);
     setShopPrices([]);
@@ -240,19 +240,7 @@ export default function App() {
     fetchUserPreferences();
   }, []);
 
-// ★追加: ユーザー設定（常備調味料）をサーバーから取得する関数
-  const fetchUserPreferences = async () => {
-    try {
-      const res = await fetch(`${recipe_URL}/api/v1/preferences`);
-      if (res.ok) {
-        const data = await res.json();
-        // APIレスポンスの condiments 配列をセット
-        setServerCondiments(data.condiments || []);
-      }
-    } catch (error) {
-      console.error("ユーザー設定の取得に失敗しました:", error);
-    }
-  };
+
 
   // API連動関数 (App.tsx準拠)
   const fetchInventoryBalances = async () => {
@@ -917,6 +905,10 @@ const deleteInventoryItemCall = async (id: string) => {
   };
 
   const suggestedRecipes = getSuggestedRecipes();
+  // 3. モーダルで開くための「調味料補正済み」の選定レシピ
+  const currentModalRecipe = selectedRecipe 
+    ? (processedRecipes.find(r => r.id === selectedRecipe.id) || selectedRecipe)
+    : null;
 
   const handleGenerateRecipe = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1133,6 +1125,8 @@ const handleFinalAdd = async (recipe: Recipe) => {
     await fetchExpenses();
   };
 
+
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="mx-auto max-w-7xl p-4">
@@ -1346,7 +1340,8 @@ const handleFinalAdd = async (recipe: Recipe) => {
       </div>
 
       {/* 詳細・適応＆不足材料店舗見積もり用モーダル (App.tsx実装) */}
-      {selectedRecipe && (
+      {/* 詳細・適応＆不足材料店舗見積もり用モーダル (App.tsx実装) */}
+      {currentModalRecipe && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl relative">
             <button 
@@ -1357,68 +1352,37 @@ const handleFinalAdd = async (recipe: Recipe) => {
               <X className="size-5" />
             </button>
             
-{(() => {
-              // ★補正処理: selectedRecipe を現在最新の serverCondiments を反映したオブジェクトに差し替える
-              const currentRecipe = processedRecipes.find(r => r.id === selectedRecipe.id) || selectedRecipe;
+            <h3 className="text-2xl font-bold text-gray-800 mb-1">{currentModalRecipe.title}</h3>
+            {currentModalRecipe.url && (
+              <a href={currentModalRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
+                クックパッドで元レシピを見る ↗
+              </a>
+            )}
+            
+            <p className="text-purple-600 font-semibold mb-4">
+              ⏱ 調理時間: {currentModalRecipe.cookingTime}分 
+              {currentModalRecipe.estimatedCost && ` / 💰 目安: ¥${currentModalRecipe.estimatedCost}`}
+            </p>
+            
+            <div className="mb-4">
+              <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
+              <ul className="space-y-1">
+                {currentModalRecipe.ingredients?.map((ing, idx) => (
+                  <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
+                    <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
+                    {/* ★ 補正された isInFridge が使われるため、常備調味料なら「冷蔵庫あり」に切り替わります */}
+                    {ing.isInFridge ? (
+                      <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
+                    ) : (
+                      <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
 
-              return (
-                <>
-                  <h3 className="text-2xl font-bold text-gray-800 mb-1">{currentRecipe.title}</h3>
-                  {currentRecipe.url && (
-                    <a href={currentRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
-                      クックパッドで元レシピを見る ↗
-                    </a>
-                  )}
-                  
-                  <p className="text-purple-600 font-semibold mb-4">
-                    ⏱ 調理時間: {currentRecipe.cookingTime}分 
-                    {currentRecipe.estimatedCost && ` / 💰 目安: ¥${currentRecipe.estimatedCost}`}
-                  </p>
-                  
-                  <div className="mb-4">
-                    <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
-                    <ul className="space-y-1">
-                      {currentRecipe.ingredients?.map((ing, idx) => (
-                        <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
-                          <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
-                          {/* ★ 補正された isInFridge が使われるため、「冷蔵庫あり」に切り替わります */}
-                          {ing.isInFridge ? (
-                            <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
-                          ) : (
-                            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-
-                  {/* 中略: shopPrices や作り方手順などの既存のUI要素 */}
-                  
-                  <div className="flex gap-3">
-                    <button
-                      type="button"
-                      // ★ 変更: 引数も currentRecipe に変更して「要購入店舗の算出」の計算を狂わせないようにします
-                      onClick={() => handleFetchPurchaseEstimation(currentRecipe)}
-                      disabled={isFetchingPrices}
-                      className="flex-1 flex items-center justify-center gap-1 bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md hover:bg-amber-600 transition-all active:scale-95 disabled:bg-amber-300 disabled:cursor-not-allowed"
-                    >
-                      {isFetchingPrices ? <Loader2 className="size-5 animate-spin" /> : <ShoppingCart className="size-5" />}
-                      {isFetchingPrices ? "価格を取得中..." : "足りない材料を購入"}
-                    </button>
-                    <button
-                      type="button"
-                      // ★ 変更: 適応ボタン時にも上書き済みのデータを渡します
-                      onClick={() => handleFinalAdd(currentRecipe)}
-                      className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all"
-                    >
-                      このレシピを適応する
-                    </button>
-                  </div>
-                </>
-              );
-            })()}
-
-{shopPrices.length > 0 && (
+            {/* おすすめ店舗見積もりセクション */}
+            {shopPrices && (
               <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200">
                 <h4 className="font-bold text-gray-700 mb-3 flex items-center gap-1.5 text-sm">
                   <Store className="size-4 text-orange-500" /> 🛒 不足材料の購入おすすめ店舗
@@ -1430,7 +1394,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
                       {shopPrices[0].shopName}
                     </div>
                   ) : (
-                    // 金額表示(¥)を一切排除し、おすすめ店舗をランキング形式で表示
+                    // おすすめ店舗をランキング形式で表示
                     shopPrices.slice(0, 2).map((shop: any, idx: number) => (
                       <div 
                         key={idx} 
@@ -1473,9 +1437,9 @@ const handleFinalAdd = async (recipe: Recipe) => {
 
             <div className="mb-6">
               <h4 className="font-bold text-gray-700 mb-1.5">🍳 作り方手順</h4>
-              {selectedRecipe.steps ? (
+              {currentModalRecipe.steps ? (
                 <div className="space-y-2">
-                  {selectedRecipe.steps.map((step) => (
+                  {currentModalRecipe.steps.map((step) => (
                     <div key={step.order} className="flex gap-2.5 text-sm p-2 bg-slate-50 rounded border border-slate-100">
                       <span className="font-bold text-purple-600 shrink-0">{step.order}.</span>
                       <p className="text-gray-600 leading-relaxed">{step.description}</p>
@@ -1484,7 +1448,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
                 </div>
               ) : (
                 <p className="text-gray-600 whitespace-pre-wrap text-sm leading-relaxed bg-gray-50 p-3 rounded-lg border">
-                  {selectedRecipe.instructions}
+                  {currentModalRecipe.instructions}
                 </p>
               )}
             </div>
@@ -1492,20 +1456,18 @@ const handleFinalAdd = async (recipe: Recipe) => {
             <div className="flex gap-3">
               <button
                 type="button"
-                onClick={() => handleFetchPurchaseEstimation(selectedRecipe)}
+                // ★ 変更: 引数を補正済みの currentModalRecipe に変更
+                onClick={() => handleFetchPurchaseEstimation(currentModalRecipe)}
                 disabled={isFetchingPrices}
                 className="flex-1 flex items-center justify-center gap-1 bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md hover:bg-amber-600 transition-all active:scale-95 disabled:bg-amber-300 disabled:cursor-not-allowed"
               >
-                {isFetchingPrices ? (
-                  <Loader2 className="size-5 animate-spin" />
-                ) : (
-                  <ShoppingCart className="size-5" />
-                )}
+                {isFetchingPrices ? <Loader2 className="size-5 animate-spin" /> : <ShoppingCart className="size-5" />}
                 {isFetchingPrices ? "価格を取得中..." : "足りない材料を購入"}
               </button>
               <button
                 type="button"
-                onClick={() => handleFinalAdd(selectedRecipe)}
+                // ★ 変更: 適応ボタン時にも補正済みの currentModalRecipe を渡します
+                onClick={() => handleFinalAdd(currentModalRecipe)}
                 className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all"
               >
                 このレシピを適応する
