@@ -243,7 +243,7 @@ const fetchUserPreferences = async () => {
 
 
   // API連動関数 (App.tsx準拠)
-  const fetchInventoryBalances = async () => {
+const fetchInventoryBalances = async () => {
     try {
       const res = await fetch(`${kakeibo_URL}/inventory/balances?include_zero=false`);
       if (!res.ok) throw new Error(`在庫取得エラー: ${res.status}`);
@@ -251,10 +251,11 @@ const fetchUserPreferences = async () => {
 
       if (data && Array.isArray(data.items)) {
         const formattedInventory = data.items.map((item: any) => ({
+          // バックエンドの仕様に合わせてマッピング
           id: item.product_id.toString(),
-          name: item.normalized_name || "不明な食材",
-          quantity: item.current_quantity,
-          unit: item.base_unit || "個",
+          name: item.product_name || "不明な食材", // 💡 ここを item.product_name に修正
+          quantity: Number(item.quantity),        // 💡 バックエンドが "16.00" のように文字列で返してくるので、確実な数値化
+          unit: item.unit || "個",                // 💡 base_unit から unit に修正
           category: "食材在庫"
         }));
         setInventory(formattedInventory);
@@ -1211,6 +1212,7 @@ const handleFinalAdd = async (recipe: Recipe) => {
           </Tabs.Content>
 
 {/* 2. 在庫タブ */}
+ {/* 2. 在庫タブ */}
           <Tabs.Content value="inventory" className="space-y-4">
             <div className="rounded-lg bg-white p-6 shadow-md">
               <div className="mb-4 flex items-center justify-between">
@@ -1229,45 +1231,12 @@ const handleFinalAdd = async (recipe: Recipe) => {
                 </button>
               </div>
 
-              {/* 🚨 【合算ロジックを追加】同じ食材を自動的にまとめてから表示する */}
-              {(() => {
-                const aggregatedInventory: any[] = [];
-
-                if (Array.isArray(inventory)) {
-                  inventory.forEach((item: any) => {
-                    // 1. すでに合算用配列に同じ正規化名（または商品名）があるか探す
-                    const existingIndex = aggregatedInventory.findIndex(
-                      (agg) => (agg.normalized_name || agg.name) === (item.normalized_name || item.name)
-                    );
-
-                    if (existingIndex > -1) {
-                      // 2. すでにある場合は、数量（base_quantity または quantity）を合算する
-                      // ※ サーバーから文字列 "1.00" で返ってきても大丈夫なように Number() で確実に数値化
-                      const currentQty = Number(aggregatedInventory[existingIndex].base_quantity || aggregatedInventory[existingIndex].quantity) || 0;
-                      const newQty = Number(item.base_quantity || item.quantity) || 0;
-                      
-                      // 念のため両方のプロパティを更新
-                      if (aggregatedInventory[existingIndex].base_quantity !== undefined) {
-                        aggregatedInventory[existingIndex].base_quantity = currentQty + newQty;
-                      }
-                      if (aggregatedInventory[existingIndex].quantity !== undefined) {
-                        aggregatedInventory[existingIndex].quantity = currentQty + newQty;
-                      }
-                    } else {
-                      // 3. まだ合算配列にない食材なら、新しく追加する
-                      aggregatedInventory.push({ ...item });
-                    }
-                  });
-                }
-
-                return (
-                  <InventoryList
-                    inventory={aggregatedInventory} // ✨ バラバラのデータではなく、合算済みの綺麗な配列を渡す！
-                    onDelete={deleteInventoryItemCall}
-                    onUpdate={updateInventoryItem}
-                  />
-                );
-              })()}
+              {/* 💡 フロントでの重い合算ループを全削除し、stateをそのまま渡すだけ！ */}
+              <InventoryList
+                inventory={inventory} 
+                onDelete={deleteInventoryItemCall}
+                onUpdate={updateInventoryItem}
+              />
             </div>
           </Tabs.Content>
 
