@@ -42,7 +42,7 @@ export function WelcomeScreen({ onStart }: WelcomeScreenProps) {
             <div>
               <h3 className="mb-1 font-bold text-gray-800">📦 在庫管理</h3>
               <p className="text-sm text-gray-600">
-                家にある食材を一覧で管理。賞味期限も記録できます
+                家にある食材を一覧で管理。消費期限を切らなさいように通知します
               </p>
             </div>
           </div>
@@ -64,9 +64,9 @@ export function WelcomeScreen({ onStart }: WelcomeScreenProps) {
               <TrendingDown className="size-6 text-white" />
             </div>
             <div>
-              <h3 className="mb-1 font-bold text-gray-800">💰 価格比較</h3>
+              <h3 className="mb-1 font-bold text-gray-800">価格比較</h3>
               <p className="text-sm text-gray-600">
-                複数の店舗の価格を比較して、最適な購入場所を提案します
+                購入履歴から、最適な購入場所を提案します
               </p>
             </div>
           </div>

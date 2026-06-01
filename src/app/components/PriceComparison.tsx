@@ -123,7 +123,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
     return (
       <div className="space-y-4">
         {/* おすすめ店舗 */}
-        <div className="rounded-lg bg-gradient-to-br from-orange-500 to-yellow-500 p-4 text-white shadow-md">
+        <div className="rounded-lg bg-gradient-to-br bg-[#EEF3E9] border border-[#B8C7B8] p-4 text-[#4A6449] shadow-md">
           <div className="mb-3 flex items-center gap-2">
             <Award className="size-5" />
             <h3 className="font-bold">おすすめの店舗</h3>
@@ -132,7 +132,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
             {storeRecommendations.slice(0, 3).map((store, idx) => (
               <div
                 key={store.storeName}
-                className="rounded-lg bg-white/20 p-3 backdrop-blur"
+                className="rounded-lg rounded-lg border border-[#D7E0D4] bg-white p-3"
               >
                 <div className="mb-1 flex items-center gap-2">
                   {idx === 0 && <span className="text-lg">🥇</span>}
@@ -140,9 +140,9 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
                   {idx === 2 && <span className="text-lg">🥉</span>}
                   <p className="text-sm font-bold">{store.storeName}</p>
                 </div>
-                <p className="text-xs text-orange-100">
-                  {store.bestItemsCount}/{store.totalItems}品目で最安値 ({store.percentage}%)
-                </p>
+                <p className="text-sm text-[#6B8466]">
+                最安値の商品 {store.bestItemsCount} / {store.totalItems}品目
+              </p>
               </div>
             ))}
           </div>
@@ -249,7 +249,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
   return (
     <div className="space-y-4">
       {/* おすすめ店舗 */}
-      <div className="rounded-lg bg-gradient-to-r from-orange-500 to-yellow-500 p-6 text-white shadow-md">
+      <div className="rounded-lg bg-gradient-to-r bg-[#EEF3E9] border border-[#B8C7B8] p-6 text-[#4A6449] shadow-md">
         <div className="mb-3 flex items-center gap-2">
           <Award className="size-6" />
           <h3 className="text-xl font-bold">おすすめの店舗</h3>
@@ -258,7 +258,7 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
           {storeRecommendations.slice(0, 3).map((store, idx) => (
             <div
               key={store.storeName}
-              className="rounded-lg bg-white/20 p-4 backdrop-blur"
+              className="rounded-lg border border-[#D7E0D4] bg-white p-3"
             >
               <div className="mb-2 flex items-center gap-2">
                 {idx === 0 && <span className="text-2xl">🥇</span>}
@@ -266,8 +266,8 @@ export function PriceComparison({ expenses, compact = false }: PriceComparisonPr
                 {idx === 2 && <span className="text-2xl">🥉</span>}
                 <p className="font-bold">{store.storeName}</p>
               </div>
-              <p className="text-sm text-orange-100">
-                {store.bestItemsCount}/{store.totalItems}品目で最安値
+              <p className="text-sm text-[#6B8466]">
+                最安値の商品 {store.bestItemsCount} / {store.totalItems}品目
               </p>
               <p className="text-lg font-bold">{store.percentage}%</p>
             </div>
