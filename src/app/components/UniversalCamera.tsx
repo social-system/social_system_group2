@@ -131,6 +131,7 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
   };
 
   // 💡 【ポイント】画面でユーザーが選んだ値（セレクトボックス）を正しく組み立て直して送信
+// 💡 画面上の変更（カテゴリー選択）を完璧に反映させる確定処理
   const handleConfirmCall = async () => {
     if (!capturedImage) return;
     setIsProcessing(true);
@@ -148,7 +149,6 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
       const prepareBody = {
         status: "needs_confirmation",
-        // 💡 "SHOP" から "【レシート】店名未設定" に変更
         store_name: (extractedData.store_name || "").trim() !== "" 
           ? extractedData.store_name!.trim() 
           : "【レシート】店名未設定",
@@ -156,14 +156,10 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
         total_amount: Number(extractedData.total_amount) || 0,
         items: Array.isArray(extractedData.items)
           ? extractedData.items.map((item: any) => {
-              // 💡 ユーザーがセレクトボックスで「食費」や「野菜」を選んだ、もしくはOCR結果がそうである場合
               const currentCat = item.category_name || "食費";
-              const isFood = 
-                currentCat === "食費" || 
-                currentCat === "野菜" || 
-                currentCat === "vegetable" || 
-                currentCat === "mushroom" ||
-                item.is_inventory_target === true;
+              
+              // 💡 【超重要】「食費」または「野菜」系のカテゴリーの時だけ在庫対象(true)にする
+              const isFood = ["食費", "野菜", "vegetable", "mushroom"].includes(currentCat);
 
               return {
                 raw_name: (item.raw_name || "不明な商品").trim(),
@@ -175,7 +171,7 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
                 base_unit: isFood ? (item.base_unit || item.purchased_unit || "個") : null,
                 unit_price: Number(item.unit_price) || 0,
                 line_total: Number(item.line_total) || 0,
-                is_inventory_target: isFood, 
+                is_inventory_target: isFood, // 👈 ここで日用品ならしっかり false に落とす
                 confidence: 1.0,
                 warnings: []
               };
@@ -210,27 +206,25 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
         finalDateNum = Number(digitOnly);
       }
 
-      // 💡 画面上の変更（食費や野菜など）を最終送信データにもしっかり引継ぎ、安全ガードを効かせる
       const cleansedPayload: any = {
         store_name: finalReceiptPayload.store_name,
         purchased_at: finalDateNum,
         total_amount: Number(finalReceiptPayload.total_amount) || 0,
         items: Array.isArray(finalReceiptPayload.items)
           ? finalReceiptPayload.items.map((item: any, idx: number) => {
+              // 💡 画面上の最新のカテゴリー状態を再取得
               const originalItem = extractedData.items?.[idx] || {};
               const userCat = originalItem.category_name || item.category_name || "食費";
               
-              const shouldBeInventory = 
-                item.is_inventory_target === true || 
-                originalItem.is_inventory_target === true ||
-                ["食費", "野菜", "vegetable", "mushroom"].includes(userCat);
+              // 💡 【超重要】ここでも過去のフラグに惑わされず、選択されたカテゴリーだけで在庫対象かを最終決定する
+              const shouldBeInventory = ["食費", "野菜", "vegetable", "mushroom"].includes(userCat);
 
               return {
                 raw_name: item.raw_name,
                 normalized_name: item.normalized_name,
                 product_id: item.product_id || null,
                 category_id: item.category_id || null,
-                is_inventory_target: shouldBeInventory,
+                is_inventory_target: shouldBeInventory, // 👈 正真正銘の判定結果をセット
                 purchased_quantity: item.purchased_quantity,
                 purchased_unit: item.purchased_unit,
                 unit_price: item.unit_price,
@@ -253,8 +247,8 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
       if (!response.ok) throw new Error(`本登録サーバーエラー`);
 
       alert("家計簿と在庫に登録が完了しました！");
-      onCapture(); // 親側のリフレッシュを呼ぶ
-      onClose(); // モーダルを閉じる
+      onCapture(); 
+      onClose(); 
     } catch (err) {
       console.error(err);
       alert("データの保存に失敗しました。");
