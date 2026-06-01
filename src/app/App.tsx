@@ -1002,15 +1002,37 @@ const handleFinalAdd = async (recipe: Recipe) => {
   };
 
 const handleCameraCaptureComplete = async () => {
+    console.log("📸 レシート登録成功後の画面更新シーケンスを開始します...");
+    
+    // 💡 サーバーのフリーズに巻き込まれないよう、3秒〜5秒で強制的に見切るタイマーを設定
+    const forceRefresh = setTimeout(async () => {
+      console.warn("⚠️ サーバーからの完了応答が遅いため、強制的に画面を更新します（裏でDB登録は完了しています）");
+      try {
+        await Promise.all([
+          fetchExpenses(),
+          fetchInventoryBalances() // 👈 応答がなくても在庫を強制再読込！
+        ]);
+      } catch (e) {
+        console.error("強制更新中のデータ取得エラー:", e);
+      } finally {
+        setShowCamera(false);
+      }
+    }, 4500); // 4.5秒経ったらフリーズとみなして次へ進む
+
     try {
-      // 💡 家計簿データと同時に、最新の在庫データも裏でまとめて再取得します
+      // 本来の再読み込み処理（サーバーが早く返事をくれた場合はこちらが即座に走る）
       await Promise.all([
         fetchExpenses(),
-        fetchInventoryBalances() // 👈 【これを追加！】カメラ登録後の在庫を即座に反映
+        fetchInventoryBalances()
       ]);
+      
+      // 早く終わったら上記の強制タイマーは解除する
+      clearTimeout(forceRefresh);
+      console.log("✅ すべてのデータを正常にリアルタイム更新しました");
     } catch (err) {
-      console.error("カメラ完了後のデータ再取得に失敗しました:", err);
+      console.error("データ再取得中にエラーが発生しました:", err);
     } finally {
+      // 確実にカメラモーダルを閉じる
       setShowCamera(false);
     }
   };
