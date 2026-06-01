@@ -336,27 +336,49 @@ const fetchExpenses = async () => {
                 console.error(`レシート詳細(id:${item.id})の取得に失敗しました`, err);
               }
             }
+// 💡 ここから追加：カメラ経由（【レシート】から始まる店名）の場合は強制的にレシートデータにするガード
+            const storeName = item.store_name || "";
+            const isCameraReceipt = storeName.includes("【レシート】");
 
-            // 💡 【ここを追加】店名やフラグから、手動登録されたデータか賢く判定する
             const isManualInput = 
-              item.is_manual === true || 
-              item.source_type === "manual" ||
-              (item.store_name && (
-                item.store_name.includes("手動") || 
-                item.store_name.includes("レシピ") || 
-                item.store_name === "SHOP" ||
-                item.store_name === "AIレシピ適応調理"
-              ));
+              !isCameraReceipt && ( // カメラレシートで「ない」場合のみ、手動入力判定を行う
+                item.is_manual === true || 
+                item.source_type === "manual" ||
+                storeName.includes("手動") || 
+                storeName.includes("レシピ") || 
+                storeName === "SHOP" ||
+                storeName === "AIレシピ適応調理"
+              );
 
             return {
               id: currentId,
               amount: Number(item.total_amount) || 0,
-              // ✨ 固定ではなく、判定結果によって表示を正しく切り替える
-              category: isManualInput ? "手動入力" : "レシートデータ",
-              description: item.store_name || "店舗名未設定",
+              // 💡 固定値だった "レシートデータ" から、判定結果に応じて切り替わるように変更
+              category: isManualInput ? "手動入力" : "レシートデータ", 
+              description: storeName || "店舗名未設定",
               date: parsedDate,
               items: itemsPayload
             };
+            // 💡 【ここを追加】店名やフラグから、手動登録されたデータか賢く判定する
+//            const isManualInput = 
+//              item.is_manual === true || 
+//              item.source_type === "manual" ||
+//              (item.store_name && (
+//                item.store_name.includes("手動") || 
+//                item.store_name.includes("レシピ") || 
+//                item.store_name === "SHOP" ||
+//                item.store_name === "AIレシピ適応調理"
+//              ));
+//
+//            return {
+//              id: currentId,
+//              amount: Number(item.total_amount) || 0,
+//              // ✨ 固定ではなく、判定結果によって表示を正しく切り替える
+//              category: isManualInput ? "手動入力" : "レシートデータ",
+//              description: item.store_name || "店舗名未設定",
+//              date: parsedDate,
+//              items: itemsPayload
+//            };
           })
         );
         

@@ -148,7 +148,10 @@ export function UniversalCamera({ onCapture, onClose }: UniversalCameraProps) {
 
       const prepareBody = {
         status: "needs_confirmation",
-        store_name: (extractedData.store_name || "SHOP").trim(),
+        // 💡 "SHOP" から "【レシート】店名未設定" に変更
+        store_name: (extractedData.store_name || "").trim() !== "" 
+          ? extractedData.store_name!.trim() 
+          : "【レシート】店名未設定",
         purchased_at: dateStr,
         total_amount: Number(extractedData.total_amount) || 0,
         items: Array.isArray(extractedData.items)
