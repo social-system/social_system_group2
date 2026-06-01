@@ -375,11 +375,11 @@ const fetchExpenses = async () => {
     }
   };
     
-const submitReceiptPayload = async (requestBody: any) => {
+// ✨ 【完全改修版】野菜・キノコ判定を確実に保持して本登録する関数
+  const submitReceiptPayload = async (requestBody: any) => {
     try {
       if (!requestBody) return;
 
-      // 日付の成形
       let dateNum = 20260531;
       let dateStr = "2026-05-31";
       if (requestBody.purchased_at) {
@@ -393,19 +393,13 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
       }
 
-      // 明細が配列として存在しているか判定
       const hasItems = Array.isArray(requestBody.items) && requestBody.items.length > 0;
       
-      // 💡 入力された店名を綺麗にし、もし「手動」という文字がなければ自動で【手動】を頭に付けます
       const rawStoreName = (requestBody.store_name || "").trim() || "手動登録店舗";
       const finalStoreName = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
-      
-      const isHandledInventory = rawStoreName === "手動在庫追加";
 
-      // 🚨 【最重要修正】明細がない一括登録 or 手動在庫追加の場合は、直接登録する！
       if (!hasItems) {
         const directPayload = {
-          // 💡 強制的に「手動在庫追加」にするのをやめ、入力された店名（【手動】〇〇）をそのまま使います！
           store_name: finalStoreName,
           purchased_at: dateNum,
           total_amount: Number(requestBody.total_amount) || 0,
@@ -415,7 +409,7 @@ const submitReceiptPayload = async (requestBody: any) => {
               normalized_name: "手動追加食材",
               product_id: null,
               category_id: null,
-              is_inventory_target: true, // 在庫管理の対象にする
+              is_inventory_target: true,
               purchased_quantity: 1,
               purchased_unit: "個",
               unit_price: Number(requestBody.total_amount) || 0,
@@ -440,47 +434,44 @@ const submitReceiptPayload = async (requestBody: any) => {
         }
 
         await fetchExpenses();
+        await fetchInventoryBalances();
         return; 
       }
 
-      // --- 通常の詳細明細がある場合（これまでの正常ルート） ---
-// --- 通常の詳細明細がある場合（これまでの正常ルート） ---
-const prepareBody = {
-  status: "needs_confirmation",
-  store_name: finalStoreName, 
-  purchased_at: dateStr, 
-  total_amount: Number(requestBody.total_amount) || 0, 
-  items: requestBody.items.map((item: any) => {
-    // 💡 "食費" という文字列だけでなく、野菜(vegetable)やキノコ(mushroom)、
-    // または元のデータが最初から true だった場合も許容するようにガードを広げます
-    const isFood = 
-      item.category_name === "食費" || 
-      item.normalized_name === "食費" ||
-      item.category_name === "vegetable" ||
-      item.category_name === "野菜" ||
-      item.category_name === "mushroom" ||
-      item.is_inventory_target === true; // ✨ 元々 true だった場合も維持する
+      const prepareBody = {
+        status: "needs_confirmation",
+        store_name: finalStoreName, 
+        purchased_at: dateStr, 
+        total_amount: Number(requestBody.total_amount) || 0, 
+        items: requestBody.items.map((item: any) => {
+          const isFood = 
+            item.category_name === "食費" || 
+            item.normalized_name === "食費" ||
+            item.category_name === "vegetable" ||
+            item.category_name === "野菜" ||
+            item.category_name === "mushroom" ||
+            item.is_inventory_target === true;
 
-    const q = Number(item.purchased_quantity) || 1;
-    const u = item.purchased_unit || "個";
-    return {
-      raw_name: (item.raw_name || "手動登録商品").trim(),
-      normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-      // 💡 カテゴリ名が空でなければ元のカテゴリ（vegetable等）をそのまま活かす
-      category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
-      purchased_quantity: q,
-      purchased_unit: u,
-      base_quantity: q,
-      base_unit: u,
-      unit_price: Number(item.unit_price) || 0,
-      line_total: Number(item.line_total) || 0,
-      is_inventory_target: isFood, // 👈 これで正しく true が入るようになります
-      confidence: 1.0,
-      warnings: []
-    };
-  }),
-  warnings: []
-};
+          const q = Number(item.purchased_quantity) || 1;
+          const u = item.purchased_unit || "個";
+          return {
+            raw_name: (item.raw_name || "手動登録商品").trim(),
+            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
+            category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
+            purchased_quantity: q,
+            purchased_unit: u,
+            base_quantity: q,
+            base_unit: u,
+            unit_price: Number(item.unit_price) || 0,
+            line_total: Number(item.line_total) || 0,
+            is_inventory_target: isFood,
+            confidence: 1.0,
+            warnings: []
+          };
+        }),
+        warnings: []
+      };
+
       const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -508,23 +499,30 @@ const prepareBody = {
           const finalQty = Number(originalItem.purchased_quantity || item.purchased_quantity) || 1;
           const finalUnit = originalItem.purchased_unit || item.purchased_unit || "個";
 
+          const shouldBeInventory = 
+            originalItem.is_inventory_target === true || 
+            item.is_inventory_target === true || 
+            originalItem.category_name === "食費" || 
+            originalItem.category_name === "野菜" || 
+            originalItem.category_name === "vegetable" || 
+            originalItem.category_name === "mushroom" || 
+            item.category_name === "食費" || 
+            item.normalized_name === "食費" ||
+            item.product_id !== null || 
+            finalStoreName.includes("手動在庫追加");
+
           return {
             raw_name: (originalItem.raw_name || item.raw_name || "手動登録商品").trim(),
             normalized_name: (originalItem.normalized_name || item.normalized_name || item.raw_name || "手動登録商品").trim(),
             product_id: item.product_id || null, 
             category_id: item.category_id || null,
-            is_inventory_target: 
-  originalItem.is_inventory_target === true || // 元のデータが最初から在庫対象なら維持
-  originalItem.category_name === "食費" || 
-  item.category_name === "食費" || 
-  item.normalized_name === "食費" ||
-  finalStoreName.includes("手動在庫追加"), // 手動在庫追加ルートなら強制的にtrue
-  purchased_quantity: finalQty, 
+            is_inventory_target: shouldBeInventory,
+            purchased_quantity: finalQty, 
             purchased_unit: finalUnit,
             unit_price: Number(originalItem.unit_price || item.unit_price) || 0,
             line_total: Number(originalItem.line_total || item.line_total) || 0,
-            base_quantity: finalQty, 
-            base_unit: finalUnit
+            base_quantity: item.base_quantity || finalQty, 
+            base_unit: item.base_unit || finalUnit
           };
         });
       }
@@ -544,6 +542,7 @@ const prepareBody = {
       }
 
       await fetchExpenses();
+      await fetchInventoryBalances();
     } catch (err) {
       console.error("送信プロセス失敗:", err);
       alert("データの保存に失敗しました。バックエンドのバリデーションを確認してください。");
