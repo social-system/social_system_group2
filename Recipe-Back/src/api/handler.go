@@ -223,12 +223,37 @@ func (h *RecipeHandler) AcceptRecipe(w http.ResponseWriter, r *http.Request) {
 	var movementsCreated int
 	var skipped []string
 
+	stockQty := make(map[int]float64)
+	stockUnit := make(map[int]string)
+	if inv, err := h.fridgeClient.GetInventory(r.Context()); err == nil {
+		for _, item := range inv.Items {
+			if v, err := strconv.ParseFloat(item.CurrentQuantity, 64); err == nil {
+				stockQty[item.ProductID] += v
+				if stockUnit[item.ProductID] == "" {
+					stockUnit[item.ProductID] = item.Unit
+				}
+			}
+		}
+	}
+
 	now := time.Now()
 	for i, ing := range fridgeIngredients {
 		quantity, parsedUnit := parseAmount(normalizedAmounts[i])
 		unit := ing.Unit
 		if unit == "" {
 			unit = parsedUnit
+		}
+
+		if sQty, ok := stockQty[ing.ProductID]; ok {
+			sUnit := stockUnit[ing.ProductID]
+			if sUnit != "" && unit != "" && sUnit != unit {
+				slog.Warn("unit mismatch, skipping cap", "product_id", ing.ProductID, "recipe_unit", unit, "stock_unit", sUnit)
+			} else if recipeQty, err := strconv.ParseFloat(quantity, 64); err == nil {
+				if recipeQty > sQty {
+					slog.Info("capping quantity to stock", "product_id", ing.ProductID, "recipe_qty", recipeQty, "stock_qty", sQty)
+					quantity = strconv.FormatFloat(sQty, 'f', -1, 64)
+				}
+			}
 		}
 
 		movReq := fridge.MovementRequest{
