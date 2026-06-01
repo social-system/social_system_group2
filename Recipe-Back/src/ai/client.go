@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 
@@ -14,9 +15,17 @@ import (
 	"github.com/openai/openai-go/responses"
 )
 
+// NormalizeItem は分量正規化の対象食材を表す
+type NormalizeItem struct {
+	Name   string
+	Amount string
+	Unit   string // 在庫に登録されている単位。空の場合は推定する
+}
+
 // Client はAIへのレシピ提案依頼インターフェース
 type Client interface {
 	SuggestRecipes(ctx context.Context, req SuggestRequest) ([]Recipe, error)
+	NormalizeAmounts(ctx context.Context, items []NormalizeItem) ([]string, error)
 }
 
 type openaiClient struct {
@@ -96,6 +105,32 @@ func (c *openaiClient) callAPI(ctx context.Context, req SuggestRequest) ([]Recip
 		return nil, fmt.Errorf("recipe parse failed: %w", err)
 	}
 	return recipes, nil
+}
+
+func (c *openaiClient) NormalizeAmounts(ctx context.Context, items []NormalizeItem) ([]string, error) {
+	input, _ := json.Marshal(items)
+	resp, err := c.client.Responses.New(ctx, responses.ResponseNewParams{
+		Model:        openai.ResponsesModel(c.model),
+		Instructions: openai.String(buildNormalizeAmountSystemPrompt()),
+		Input: responses.ResponseNewParamsInputUnion{
+			OfString: openai.String(string(input)),
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("openai NormalizeAmounts API call failed: %w", err)
+	}
+	rawText := strings.TrimSpace(resp.OutputText())
+	if rawText == "" {
+		return nil, fmt.Errorf("openai NormalizeAmounts returned empty response")
+	}
+	var normalized []string
+	if err := json.Unmarshal([]byte(rawText), &normalized); err != nil {
+		return nil, fmt.Errorf("openai NormalizeAmounts parse failed: %w", err)
+	}
+	if len(normalized) != len(items) {
+		return nil, fmt.Errorf("openai NormalizeAmounts returned %d items, expected %d", len(normalized), len(items))
+	}
+	return normalized, nil
 }
 
 func validateSuggestRequest(req SuggestRequest) error {

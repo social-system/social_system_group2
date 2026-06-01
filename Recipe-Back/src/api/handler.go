@@ -196,16 +196,36 @@ func (h *RecipeHandler) AcceptRecipe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 冷蔵庫食材のみ抽出してまとめて正規化
+	var fridgeIngredients []Ingredient
+	for _, ing := range req.Ingredients {
+		if ing.IsInFridge && ing.ProductID != 0 {
+			fridgeIngredients = append(fridgeIngredients, ing)
+		}
+	}
+
+	normalizedAmounts := make([]string, len(fridgeIngredients))
+	for i, ing := range fridgeIngredients {
+		normalizedAmounts[i] = ing.Amount
+	}
+	if len(fridgeIngredients) > 0 {
+		items := make([]ai.NormalizeItem, len(fridgeIngredients))
+		for i, ing := range fridgeIngredients {
+			items[i] = ai.NormalizeItem{Name: ing.Name, Amount: ing.Amount, Unit: ing.Unit}
+		}
+		if result, err := h.aiClient.NormalizeAmounts(r.Context(), items); err != nil {
+			slog.Warn("amount normalization failed, using originals", "error", err)
+		} else {
+			normalizedAmounts = result
+		}
+	}
+
 	var movementsCreated int
 	var skipped []string
 
 	now := time.Now()
-	for _, ing := range req.Ingredients {
-		if !ing.IsInFridge || ing.ProductID == 0 {
-			continue
-		}
-
-		quantity, parsedUnit := parseAmount(ing.Amount)
+	for i, ing := range fridgeIngredients {
+		quantity, parsedUnit := parseAmount(normalizedAmounts[i])
 		unit := ing.Unit
 		if unit == "" {
 			unit = parsedUnit
@@ -216,15 +236,12 @@ func (h *RecipeHandler) AcceptRecipe(w http.ResponseWriter, r *http.Request) {
 			MovementType:   "consume",
 			Quantity:       quantity,
 			Unit:           unit,
-			BatchID:        nil,
-			LocationID:     nil,
-			Reason:         fmt.Sprintf("レシピで使用: %s", req.RecipeName),
+			Reason:         fmt.Sprintf("%sで使用", req.RecipeName),
 			OccurredAt:     now.Format("2006-01-02T15:04:05"),
-			IdempotencyKey: fmt.Sprintf("recipe:consume:%d:%d", ing.ProductID, now.UnixNano()),
 		}
 
 		if err := h.fridgeClient.PostMovement(r.Context(), movReq); err != nil {
-			slog.Warn("inventory movement failed", "product_id", ing.ProductID, "name", ing.Name, "error", err)
+			slog.Warn("inventory movement failed", "product_id", ing.ProductID, "name", ing.Name, "unit", ing.Unit, "amount", quantity, "error", err)
 			skipped = append(skipped, ing.Name)
 			continue
 		}
@@ -237,44 +254,61 @@ func (h *RecipeHandler) AcceptRecipe(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-var numericRe = regexp.MustCompile(`^(\d+)(?:/(\d+))?`)
+var numericRe = regexp.MustCompile(`^(\d+(?:\.\d+)?)(?:/(\d+))?`)
 
-// parseAmount は "200g", "2個", "大さじ2", "1/2個", "適量" などを (quantity, unit) に変換する。
-// 数値が抽出できない場合は "1.00" を返す。
+// parseAmount は "200g", "2個", "大さじ2", "0.5個", "適量" などを (quantity, unit) に変換する。
+// 例: "200g" → ("200", "g"), "0.5個" → ("0.5", "個"), "適量" → ("適量", "")
 func parseAmount(amount string) (quantity string, unit string) {
 	amount = strings.TrimSpace(amount)
+	if amount == "" {
+		return "", ""
+	}
 
-	// 前置ユニット（大さじ・小さじ）を先に抽出
-	for _, prefix := range []string{"大さじ", "小さじ"} {
-		if strings.HasPrefix(amount, prefix) {
-			rest := strings.TrimPrefix(amount, prefix)
-			q, _ := parseAmount(rest)
-			return q, prefix
+	// 先頭の非数値プレフィックスを抽出（例: "大さじ" in "大さじ2"）
+	prefixEnd := 0
+	for i, r := range amount {
+		if r >= '0' && r <= '9' {
+			break
 		}
+		prefixEnd = i + utf8.RuneLen(r)
+	}
+	prefix := amount[:prefixEnd]
+	rest := amount[prefixEnd:]
+
+	// rest が空 = 数値なし ("適量" など)
+	if rest == "" {
+		return amount, ""
 	}
 
-	m := numericRe.FindStringSubmatch(amount)
+	m := numericRe.FindStringSubmatch(rest)
 	if m == nil {
-		return "1.00", ""
+		// 数値が見つからない場合はそのまま返す
+		return amount, ""
 	}
 
+	var q float64
 	numerator, _ := strconv.ParseFloat(m[1], 64)
-	val := numerator
 	if m[2] != "" {
+		// 分数 (例: "1/2")
 		denominator, _ := strconv.ParseFloat(m[2], 64)
 		if denominator != 0 {
-			val = numerator / denominator
+			q = numerator / denominator
 		}
+	} else {
+		q = numerator
 	}
 
-	// 数値部分の後ろの文字列をユニットとする（"~N" などは除去）
-	after := amount[len(m[0]):]
-	if idx := strings.IndexAny(after, "~〜"); idx >= 0 {
-		after = ""
-	}
-	unit = strings.TrimSpace(after)
+	// 数値部分の末尾インデックスを求めてユニット部分を取り出す
+	suffix := rest[len(m[0]):]
+	unitPart := strings.TrimSpace(prefix + suffix)
 
-	return fmt.Sprintf("%.2f", val), unit
+	// 数量文字列: 整数なら小数点なし、小数なら必要な桁だけ
+	if q == float64(int64(q)) {
+		quantity = strconv.FormatInt(int64(q), 10)
+	} else {
+		quantity = strconv.FormatFloat(q, 'f', -1, 64)
+	}
+	return quantity, unitPart
 }
 
 // normalizeName は商品名・材料名の表記ゆれ（カタカナ⇄ひらがな、余分な空白等）を平滑化する

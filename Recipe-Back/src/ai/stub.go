@@ -11,6 +11,14 @@ func NewStubClient() Client {
 	return &stubClient{}
 }
 
+func (s *stubClient) NormalizeAmounts(_ context.Context, items []NormalizeItem) ([]string, error) {
+	result := make([]string, len(items))
+	for i, item := range items {
+		result[i] = item.Amount
+	}
+	return result, nil
+}
+
 func (s *stubClient) SuggestRecipes(_ context.Context, req SuggestRequest) ([]Recipe, error) {
 	return []Recipe{
 		{
