@@ -444,33 +444,42 @@ const submitReceiptPayload = async (requestBody: any) => {
       }
 
       // --- 通常の詳細明細がある場合（これまでの正常ルート） ---
-      const prepareBody = {
-        status: "needs_confirmation",
-        store_name: finalStoreName, 
-        purchased_at: dateStr, 
-        total_amount: Number(requestBody.total_amount) || 0, 
-        items: requestBody.items.map((item: any) => {
-          const isFood = item.category_name === "食費" || item.normalized_name === "食費";
-          const q = Number(item.purchased_quantity) || 1;
-          const u = item.purchased_unit || "個";
-          return {
-            raw_name: (item.raw_name || "手動登録商品").trim(),
-            normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
-            category_name: isFood ? "食費" : (item.category_name && item.category_name.trim() !== "" ? item.category_name : "その他"), 
-            purchased_quantity: q,
-            purchased_unit: u,
-            base_quantity: q,
-            base_unit: u,
-            unit_price: Number(item.unit_price) || 0,
-            line_total: Number(item.line_total) || 0,
-            is_inventory_target: isFood,
-            confidence: 1.0,
-            warnings: []
-          };
-        }),
-        warnings: []
-      };
+// --- 通常の詳細明細がある場合（これまでの正常ルート） ---
+const prepareBody = {
+  status: "needs_confirmation",
+  store_name: finalStoreName, 
+  purchased_at: dateStr, 
+  total_amount: Number(requestBody.total_amount) || 0, 
+  items: requestBody.items.map((item: any) => {
+    // 💡 "食費" という文字列だけでなく、野菜(vegetable)やキノコ(mushroom)、
+    // または元のデータが最初から true だった場合も許容するようにガードを広げます
+    const isFood = 
+      item.category_name === "食費" || 
+      item.normalized_name === "食費" ||
+      item.category_name === "vegetable" ||
+      item.category_name === "mushroom" ||
+      item.is_inventory_target === true; // ✨ 元々 true だった場合も維持する
 
+    const q = Number(item.purchased_quantity) || 1;
+    const u = item.purchased_unit || "個";
+    return {
+      raw_name: (item.raw_name || "手動登録商品").trim(),
+      normalized_name: (item.normalized_name || item.raw_name || "手動登録商品").trim(),
+      // 💡 カテゴリ名が空でなければ元のカテゴリ（vegetable等）をそのまま活かす
+      category_name: item.category_name && item.category_name.trim() !== "" ? item.category_name : "食費", 
+      purchased_quantity: q,
+      purchased_unit: u,
+      base_quantity: q,
+      base_unit: u,
+      unit_price: Number(item.unit_price) || 0,
+      line_total: Number(item.line_total) || 0,
+      is_inventory_target: isFood, // 👈 これで正しく true が入るようになります
+      confidence: 1.0,
+      warnings: []
+    };
+  }),
+  warnings: []
+};
       const prepareResponse = await fetch(`${kakeibo_URL}/receipts/prepare`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
