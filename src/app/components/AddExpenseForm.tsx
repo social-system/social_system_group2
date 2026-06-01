@@ -86,26 +86,13 @@ const handleSubmit = (e: React.FormEvent) => {
     onAdd({
       amount: parseFloat(amount),
       category,
-      description: formattedDescription, // ⭕️ ここで店舗名情報を安全に持たせる
+      description: formattedDescription,
       date: new Date(date),
       
-      // ユーザーが「商品追加（任意）」で明細を1件以上入力している場合
-      items: items.length > 0 ? items : [
-        // 明細が空（上のフォームだけで登録）の場合のフォールバック
-        {
-          raw_name: rawDescription,        // ⭕️ カテゴリ名ではなく、具体的な商品名（例: 豚肉）を入れる
-          normalized_name: rawDescription,  // ⭕️ 価格比較で一致させるために同じ名前を入れる
-          product_id: null,
-          category_id: null,
-          purchased_quantity: 1,
-          purchased_unit: '個',
-          base_quantity: 1,
-          base_unit: '個',
-          unit_price: parseFloat(amount),
-          line_total: parseFloat(amount),
-          is_inventory_target: false
-        }
-      ],
+      // 💡 【大修正】
+      // ユーザーが「商品追加（任意）」で明細を入力していない場合は、
+      // お節介なダミーは一切作らず、完全に空の配列（[]）を渡します。
+      items: items.length > 0 ? items : [],
     });
   };
 
