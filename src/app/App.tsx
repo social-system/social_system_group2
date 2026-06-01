@@ -524,7 +524,8 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       const isFoodCategory = expense.category === "食費";
       
-      const rawStoreName = (expense.description || "").trim() || "手動登録店舗";
+      const currentDescription = (expense.description || "").trim();
+      const rawStoreName = currentDescription || "手動登録店舗";
       const storeNameStr = rawStoreName.includes("【手動】") ? rawStoreName : `【手動】${rawStoreName}`;
 
       // 1. 文字の入った有効な明細が配列にあるか抽出
@@ -532,25 +533,35 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
         : [];
 
-      // 💡 【大修正】一括登録（詳細商品なし）の判定を厳格化
-      // 画面の説明文（description）や店舗名と同じ名前のダミー品目は、商品追加をしていない証拠なので完全に除外します
-// 💡 【修正版】型エラーを回避する安全な判定
-      const currentDescription = (expense.description || "").trim();
+      // 💡 【超厳格化】フォームが自動生成したダミー品目を徹底的に排除する
+      const totalAmountNum = Number(expense.amount) || 0;
 
       const realPurchasedItems = validItems.filter(item => {
         const name = item.raw_name.trim();
-        return (
-          name !== "" &&
-          name !== currentDescription && 
-          name !== rawStoreName && // 👈 expense.store_name の代わりに rawStoreName を使用
-          name !== "手動登録商品" &&
-          name !== "買い物" &&
-          name !== "レシート" &&
-          isNaN(Number(name))
-        );
+        const lineTotal = Number(item.line_total) || 0;
+
+        // 以下の条件のいずれかに当てはまる品目は、ユーザーが「商品追加」していないダミーと判定して除外
+        if (
+          name === "" ||
+          name === "手動登録商品" ||
+          name === "買い物" ||
+          name === "レシート" ||
+          isNaN(Number(name)) === false
+        ) {
+          return false;
+        }
+
+        // 💡 【ここがポイント】
+        // 明細が1件だけで、その名前が「説明（description）」と全く同じ、
+        // かつその明細の金額が「合計金額」と完全に一致する場合、フォームの自動生成ダミーなので除外します。
+        if (validItems.length === 1 && name === currentDescription && lineTotal === totalAmountNum) {
+          return false;
+        }
+
+        return true;
       });
 
-      // 本当にユーザー自身の手で「商品追加」が行われていなければ、無条件で一括登録(パターンB)にする
+      // 本当にユーザー自身の手で個別に「商品追加」が行われていなければ、一括登録(パターンB)にする
       let isBulkRegistration = realPurchasedItems.length === 0;
 
       // --- パターンA: 詳細な商品をちゃんと入力して追加した場合 ---
@@ -560,7 +571,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
           status: "needs_confirmation",
           store_name: storeNameStr,
           purchased_at: dateStr,
-          total_amount: Number(expense.amount) || 0,
+          total_amount: totalAmountNum,
           items: realPurchasedItems.map((item) => ({
             raw_name: item.raw_name.trim(),
             normalized_name: item.normalized_name ? item.normalized_name.trim() : item.raw_name.trim(),
@@ -589,7 +600,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
           const cleansedPayload: any = {
             store_name: storeNameStr, 
             purchased_at: dateNum,
-            total_amount: Number(expense.amount) || 0,
+            total_amount: totalAmountNum,
             items: []
           };
 
@@ -619,11 +630,11 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       } else {
         // --- パターンB: 詳細な商品は入力せず、一括金額だけで登録した場合 ---
-        // 💡 完全に空の items で送信するため、バックエンドの在庫は 100% 動きません
+        // 💡 フォームがお節介で入れてきた「あ」を完全に消去し、空配列 `[]` で送信します！
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr,
-          total_amount: Number(expense.amount) || 0,
+          total_amount: totalAmountNum,
           items: [] 
         };
 
@@ -637,7 +648,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       }
 
       await fetchExpenses(); 
-      await fetchInventoryBalances(); // 最新のクリーンな在庫状態を再取得
+      await fetchInventoryBalances(); // 最新の安全な在庫を再読込
 
       alert("家計簿にデータを登録しました！");
     } catch (err) {
