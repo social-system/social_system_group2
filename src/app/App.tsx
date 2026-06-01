@@ -447,7 +447,7 @@ const fetchExpenses = async () => {
         );
         
         setExpenses(detailedExpenses);
-        syncInventoryFromExpenses(detailedExpenses);
+        //syncInventoryFromExpenses(detailedExpenses);
       } else {
         setExpenses([]);
       }
