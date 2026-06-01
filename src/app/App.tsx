@@ -734,26 +734,38 @@ const addInventoryItemCall = async (item: Omit<InventoryItem, 'id'>) => {
 
 const deleteInventoryItemCall = async (id: string) => {
     try {
-      // 1. 引数の id は product_id (文字列) になっているので、数値に変換
-      const targetProductId = Number(id.replace("receipt-", ""));
+      // 1. 引数の id は、fetchInventoryBalances で「id: item.product_id.toString()」として入ってきた値
+      const targetProductId = Number(id);
       
-      // 2. 家計簿データ（expenses）の全明細の中から、この product_id を持っているレシートを検索する
+      // 2. 画面の在庫リスト（inventory）から、いま消そうとしているアイテムの名前等の情報をバックアップ
+      const currentInventoryItem = inventory.find(i => i.id === id);
+      const targetName = currentInventoryItem ? currentInventoryItem.name : "";
+
+      // 3. 家計簿データ（expenses）の全明細の中から、親レシートを特定する
       const parentExpense = expenses.find(exp => 
-        exp.items?.some(item => Number(item.product_id) === targetProductId)
+        exp.items?.some(item => {
+          // パターンA: product_id が一致するか (例: product_id が 3)
+          const isProductIdMatch = item.product_id !== null && Number(item.product_id) === targetProductId;
+          
+          // パターンB: 手動追加などでproduct_idがない場合、または合算時のために名前が一致するか
+          const isNameMatch = targetName && (item.normalized_name === targetName || item.raw_name === targetName);
+          
+          return isProductIdMatch || isNameMatch;
+        })
       );
 
-      // 3. もし家計簿から見つかればそのIDを使用。
-      // 見つからない場合は、手動在庫追加などの特殊データである可能性を考慮して id をそのまま使用
-      const receiptIdToDelete = parentExpense ? parentExpense.id : id;
+      // 4. 正しい親のレシートIDを特定（今回のトマトの場合、parentExpense.id から「83」が正しく取得できます）
+      const receiptIdToDelete = parentExpense ? parentExpense.id : null;
 
-      console.log(`削除要求された商品ID: ${id} -> 特定した大元レシートID: ${receiptIdToDelete}`);
+      console.log(`削除要求された商品ID(product_id): ${id} (${targetName}) -> 特定した大元レシートID: ${receiptIdToDelete}`);
 
+      // 5. 親レシートIDが見つからない場合は、404エラーを出す前に安全にガードする
       if (!receiptIdToDelete || String(receiptIdToDelete).includes("undefined")) {
-        alert("有効なレシートIDが見つからないため、削除処理を中断しました。");
+        alert("有効なレシートID（家計簿データ）が見つからないため、削除処理を中断しました。");
         return;
       }
 
-      // 4. 仕様書「DELETE /receipts/{receipt_id}」に従い、大元の家計簿・在庫データを一撃で削除
+      // 6. 仕様書「DELETE /receipts/{receipt_id}」に従い、特定した正しい親ID（例: 83）で一撃削除
       const response = await fetch(`${kakeibo_URL}/receipts/${receiptIdToDelete}`, {
         method: "DELETE",
       });
@@ -763,7 +775,7 @@ const deleteInventoryItemCall = async (id: string) => {
         throw new Error(`サーバーエラー: ${response.status} - ${errorText}`);
       }
 
-      // 5. 削除に成功したら画面と状態を最新に同期
+      // 7. 削除に成功したら画面と状態を最新に同期
       await fetchExpenses();            
       await fetchInventoryBalances();   
 
