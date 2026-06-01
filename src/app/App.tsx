@@ -457,6 +457,7 @@ const prepareBody = {
       item.category_name === "食費" || 
       item.normalized_name === "食費" ||
       item.category_name === "vegetable" ||
+      item.category_name === "野菜" ||
       item.category_name === "mushroom" ||
       item.is_inventory_target === true; // ✨ 元々 true だった場合も維持する
 
