@@ -269,7 +269,7 @@ export default function App() {
   const suggestedRecipes = getSuggestedRecipes();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-[#F5F0E8] to-[#EBF0E4]">
       <div className="mx-auto max-w-7xl p-4">
         <header className="mb-6">
           <div className="flex items-center justify-between">
@@ -283,7 +283,7 @@ export default function App() {
             <div className="flex flex-1 justify-end">
               <button
                 onClick={() => setShowSettings(true)}
-                className="rounded-lg p-2 text-gray-600 transition-all hover:bg-gray-200 active:scale-95"
+                className="rounded-lg p-2 text-gray-600 transition-all hover:bg-[#E7EBDD] active:scale-95"
                 aria-label="設定"
               >
                 <Settings className="size-6" />
@@ -296,21 +296,21 @@ export default function App() {
           <Tabs.List className="mb-6 flex gap-2 rounded-lg bg-white p-1 shadow-md">
             <Tabs.Trigger
               value="expenses"
-              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-blue-500 data-[state=active]:text-white data-[state=active]:shadow"
+              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-[#5C7A5C] data-[state=active]:text-white data-[state=active]:shadow"
             >
               <Receipt className="mb-1 inline-block size-5" />
               <span className="ml-2">家計簿</span>
             </Tabs.Trigger>
             <Tabs.Trigger
               value="inventory"
-              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-green-500 data-[state=active]:text-white data-[state=active]:shadow"
+              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-[#8B9D6A] data-[state=active]:text-white data-[state=active]:shadow"
             >
               <Package className="mb-1 inline-block size-5" />
               <span className="ml-2">在庫</span>
             </Tabs.Trigger>
             <Tabs.Trigger
               value="recipes"
-              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-purple-500 data-[state=active]:text-white data-[state=active]:shadow"
+              className="flex-1 rounded-md px-3 py-3 font-medium text-gray-600 transition-all hover:bg-gray-50 data-[state=active]:bg-[#C4956A] data-[state=active]:text-white data-[state=active]:shadow"
             >
               <ChefHat className="mb-1 inline-block size-5" />
               <span className="ml-2">レシピ</span>
@@ -325,14 +325,14 @@ export default function App() {
                 <h2 className="text-2xl font-bold text-gray-800">今月の支出</h2>
                 <div className="text-right">
                   <p className="text-sm text-gray-500">合計</p>
-                  <p className="text-3xl font-bold text-blue-600">¥{totalExpenses.toLocaleString()}</p>
+                  <p className="text-3xl font-bold text-[#5C7A5C]">¥{totalExpenses.toLocaleString()}</p>
                 </div>
               </div>
 
               <div className="mb-4">
                 <button
                   onClick={() => setShowAddExpense(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-blue-500 px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-blue-600 active:scale-95"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#5C7A5C] px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-[#4A6449] active:scale-95"
                 >
                   <Plus className="size-5" />
                   手動入力
@@ -361,7 +361,7 @@ export default function App() {
               <div className="mb-4">
                 <button
                   onClick={() => setShowAddInventory(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-green-500 px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-green-600 active:scale-95"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#8B9D6A] px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-[#7A8C5A] active:scale-95"
                 >
                   <Plus className="size-5" />
                   手動入力
@@ -378,17 +378,17 @@ export default function App() {
 
           <Tabs.Content value="recipes" className="space-y-4">
             {suggestedRecipes.length > 0 && (
-              <div className="rounded-lg bg-gradient-to-r from-purple-500 to-pink-500 p-6 text-white shadow-md">
-                <h3 className="mb-2 text-xl font-bold">🍳 今作れるレシピ</h3>
-                <p className="mb-3 text-purple-100">在庫の材料で作れる料理があります！</p>
+              <div className="rounded-lg border border-[#DEC2A8] bg-[#F8F1EA] p-6 shadow-sm">
+                <h3 className="mb-2 text-xl font-bold text-[#A36F42]">🍳 今作れるレシピ</h3>
+                <p className="mb-3 text-[#8A6A52]">在庫の材料で作れる料理があります！</p>
                 <div className="flex gap-2 overflow-x-auto pb-2">
                   {suggestedRecipes.map((recipe) => (
                     <div
                       key={recipe.id}
-                      className="flex-shrink-0 rounded-lg bg-white/20 px-4 py-2 backdrop-blur"
+                      className="flex-shrink-0 rounded-lg border border-[#DEC2A8] bg-white px-4 py-2 backdrop-blur"
                     >
                       <p className="font-medium">{recipe.title}</p>
-                      <p className="text-sm text-purple-100">{recipe.cookingTime}分</p>
+                      <p className="text-sm text-[#8A6A52]">{recipe.cookingTime}分</p>
                     </div>
                   ))}
                 </div>
@@ -404,7 +404,7 @@ export default function App() {
               <div className="mb-4">
                 <button
                   onClick={() => setShowAddRecipe(true)}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-purple-500 px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-purple-600 active:scale-95"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-[#C4956A] px-4 py-3 font-medium text-white shadow-md transition-all hover:bg-[#B5845A] active:scale-95"
                 >
                   <Plus className="size-5" />
                   レシピ追加
@@ -419,7 +419,7 @@ export default function App() {
         {/* フローティングカメラボタン */}
         <button
           onClick={() => setShowCamera(true)}
-          className="fixed bottom-8 right-8 flex size-24 items-center justify-center rounded-full bg-gradient-to-r from-blue-500 to-green-500 text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
+          className="fixed bottom-8 right-8 flex size-24 items-center justify-center rounded-full bg-[#6B8466] text-white shadow-2xl transition-all hover:scale-110 hover:shadow-3xl active:scale-95"
           aria-label="カメラを開く"
         >
           <Camera className="size-16" />
