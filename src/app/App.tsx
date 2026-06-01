@@ -532,22 +532,26 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
         ? expense.items.filter(item => item && item.raw_name && item.raw_name.trim() !== "")
         : [];
 
-      // 一括登録（詳細商品なし）の判定
-      let isBulkRegistration = false;
-      if (validItems.length === 0) {
-        isBulkRegistration = true;
-      } else if (validItems.length === 1) {
-        const firstName = validItems[0].raw_name.trim();
-        if (
-          firstName === rawStoreName || 
-          firstName === "買い物" || 
-          firstName === "レシート" || 
-          firstName === "手動登録商品" ||
-          !isNaN(Number(firstName))
-        ) {
-          isBulkRegistration = true;
-        }
-      }
+      // 💡 【大修正】一括登録（詳細商品なし）の判定を厳格化
+      // 画面の説明文（description）や店舗名と同じ名前のダミー品目は、商品追加をしていない証拠なので完全に除外します
+// 💡 【修正版】型エラーを回避する安全な判定
+      const currentDescription = (expense.description || "").trim();
+
+      const realPurchasedItems = validItems.filter(item => {
+        const name = item.raw_name.trim();
+        return (
+          name !== "" &&
+          name !== currentDescription && 
+          name !== rawStoreName && // 👈 expense.store_name の代わりに rawStoreName を使用
+          name !== "手動登録商品" &&
+          name !== "買い物" &&
+          name !== "レシート" &&
+          isNaN(Number(name))
+        );
+      });
+
+      // 本当にユーザー自身の手で「商品追加」が行われていなければ、無条件で一括登録(パターンB)にする
+      let isBulkRegistration = realPurchasedItems.length === 0;
 
       // --- パターンA: 詳細な商品をちゃんと入力して追加した場合 ---
       if (!isBulkRegistration) {
@@ -557,9 +561,9 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
           store_name: storeNameStr,
           purchased_at: dateStr,
           total_amount: Number(expense.amount) || 0,
-          items: validItems.map((item) => ({
+          items: realPurchasedItems.map((item) => ({
             raw_name: item.raw_name.trim(),
-            normalized_name: item.normalized_name.trim(),
+            normalized_name: item.normalized_name ? item.normalized_name.trim() : item.raw_name.trim(),
             category_name: expense.category || "食費",
             purchased_quantity: Number(item.purchased_quantity) || 1,
             purchased_unit: item.purchased_unit || "個",
@@ -615,12 +619,12 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
 
       } else {
         // --- パターンB: 詳細な商品は入力せず、一括金額だけで登録した場合 ---
-        // 💡 【修正】ダミー明細の生成をやめ、items を完全な空配列にします
+        // 💡 完全に空の items で送信するため、バックエンドの在庫は 100% 動きません
         const directBody = {
           purchased_at: dateNum,
           store_name: storeNameStr,
           total_amount: Number(expense.amount) || 0,
-          items: [] // 👈 ここを空っぽにすることで、バックエンドが在庫化（自動マスタ生成）するのを完全に防ぎます
+          items: [] 
         };
 
         const response = await fetch(`${kakeibo_URL}/receipts`, {  
@@ -633,8 +637,7 @@ const addExpenseCall = async (expense: Omit<Expense, 'id'>) => {
       }
 
       await fetchExpenses(); 
-      // 💡 もし「レシート登録時に自動で在庫へ反映するAPI（/apply）」を別途仕込んでいる場合は、
-      // ここで一括登録（isBulkRegistration === true）のときはそれを呼ばないように制御するとさらに安全です。
+      await fetchInventoryBalances(); // 最新のクリーンな在庫状態を再取得
 
       alert("家計簿にデータを登録しました！");
     } catch (err) {
