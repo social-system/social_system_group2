@@ -1340,8 +1340,8 @@ const handleFinalAdd = async (recipe: Recipe) => {
       </div>
 
       {/* 詳細・適応＆不足材料店舗見積もり用モーダル (App.tsx実装) */}
-      {/* 詳細・適応＆不足材料店舗見積もり用モーダル (App.tsx実装) */}
-      {currentModalRecipe && (
+{/* 詳細・適応＆不足材料店舗見積もり用モーダル */}
+      {selectedRecipe && (
         <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl p-6 max-w-lg w-full max-h-[85vh] overflow-y-auto shadow-2xl relative">
             <button 
@@ -1352,127 +1352,135 @@ const handleFinalAdd = async (recipe: Recipe) => {
               <X className="size-5" />
             </button>
             
-            <h3 className="text-2xl font-bold text-gray-800 mb-1">{currentModalRecipe.title}</h3>
-            {currentModalRecipe.url && (
-              <a href={currentModalRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
-                クックパッドで元レシピを見る ↗
-              </a>
-            )}
-            
-            <p className="text-purple-600 font-semibold mb-4">
-              ⏱ 調理時間: {currentModalRecipe.cookingTime}分 
-              {currentModalRecipe.estimatedCost && ` / 💰 目安: ¥${currentModalRecipe.estimatedCost}`}
-            </p>
-            
-            <div className="mb-4">
-              <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
-              <ul className="space-y-1">
-                {currentModalRecipe.ingredients?.map((ing, idx) => (
-                  <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
-                    <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
-                    {/* ★ 補正された isInFridge が使われるため、常備調味料なら「冷蔵庫あり」に切り替わります */}
-                    {ing.isInFridge ? (
-                      <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
-                    ) : (
-                      <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
+            {(() => {
+              // ★補正処理: selectedRecipe を現在最新の serverCondiments を反映したオブジェクトに差し替える
+              const currentRecipe = processedRecipes.find(r => r.id === selectedRecipe.id) || selectedRecipe;
 
-            {/* おすすめ店舗見積もりセクション */}
-            {shopPrices && (
-              <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200">
-                <h4 className="font-bold text-gray-700 mb-3 flex items-center gap-1.5 text-sm">
-                  <Store className="size-4 text-orange-500" /> 🛒 不足材料の購入おすすめ店舗
-                </h4>
-                <div className="space-y-3">
-                  {/* エラーや、材料がすでに揃っている場合のメッセージ表示 */}
-                  {Number(shopPrices[0].totalPrice) === -1 || Number(shopPrices[0].totalPrice) === 0 ? (
-                    <div className="bg-white p-3 rounded-lg shadow-sm text-sm text-gray-500 text-center border">
-                      {shopPrices[0].shopName}
-                    </div>
-                  ) : (
-                    // おすすめ店舗をランキング形式で表示
-                    shopPrices.slice(0, 2).map((shop: any, idx: number) => (
-                      <div 
-                        key={idx} 
-                        className={`p-3.5 rounded-xl shadow-sm border transition-all ${
-                          idx === 0 
-                            ? 'bg-white border-orange-300 ring-2 ring-orange-500/10' 
-                            : 'bg-white/60 border-gray-200'
-                        }`}
-                      >
-                        <div className="flex justify-between items-center text-sm mb-2">
-                          <div className="flex items-center gap-2">
-                            {idx === 0 ? (
-                              <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥇 一番おすすめ</span>
-                            ) : (
-                              <span className="bg-gray-400 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥈 第2候補</span>
-                            )}
-                            <span className="font-bold text-gray-800 text-base">{shop.shopName}</span>
+              return (
+                <>
+                  <h3 className="text-2xl font-bold text-gray-800 mb-1">{currentRecipe.title}</h3>
+                  {currentRecipe.url && (
+                    <a href={currentRecipe.url} target="_blank" rel="noreferrer" className="text-xs text-blue-500 underline block mb-3">
+                      クックパッドで元レシピを見る ↗
+                    </a>
+                  )}
+                  
+                  <p className="text-purple-600 font-semibold mb-4">
+                    ⏱ 調理時間: {currentRecipe.cookingTime}分 
+                    {currentRecipe.estimatedCost && ` / 💰 目安: ¥${currentRecipe.estimatedCost}`}
+                  </p>
+                  
+                  <div className="mb-4">
+                    <h4 className="font-bold text-gray-700 mb-1.5">🥗 材料リスト</h4>
+                    <ul className="space-y-1">
+                      {currentRecipe.ingredients?.map((ing, idx) => (
+                        <li key={idx} className="flex justify-between items-center text-sm p-1.5 rounded bg-gray-50">
+                          <span className="text-gray-700 font-medium">{ing.name} <span className="text-xs text-gray-400">({ing.amount})</span></span>
+                          {ing.isInFridge ? (
+                            <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded font-bold">冷蔵庫あり</span>
+                          ) : (
+                            <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-bold">⚠️ 要購入</span>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+
+                  {/* ★修正箇所: shopPrices と shopPrices[0] が確実に存在する場合のみレンダリングする */}
+                  {shopPrices && shopPrices.length > 0 && shopPrices[0] && (
+                    <div className="mb-4 p-4 rounded-xl bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-200">
+                      <h4 className="font-bold text-gray-700 mb-3 flex items-center gap-1.5 text-sm">
+                        <Store className="size-4 text-orange-500" /> 🛒 不足材料の購入おすすめ店舗
+                      </h4>
+                      <div className="space-y-3">
+                        {/* ★安全対策: shopPrices[0]?.totalPrice のように ?. を使って安全に読み込む */}
+                        {Number(shopPrices[0]?.totalPrice) === -1 || Number(shopPrices[0]?.totalPrice) === 0 ? (
+                          <div className="bg-white p-3 rounded-lg shadow-sm text-sm text-gray-500 text-center border">
+                            {shopPrices[0]?.shopName}
                           </div>
-                        </div>
-                        
-                        {/* このお店で購入できる材料を安全にバッジで表示 */}
-                        {shop.matchedItems && Array.isArray(shop.matchedItems) && shop.matchedItems.length > 0 && (
-                          <div className="text-xs text-gray-500">
-                            <p className="mb-1 text-gray-500 font-medium">このお店で購入できる材料:</p>
-                            <div className="flex flex-wrap gap-1">
-                              {shop.matchedItems.map((itemName: string, itemIdx: number) => (
-                                <span key={itemIdx} className="bg-gray-100 border border-gray-200 px-2 py-0.5 rounded text-[11px] text-gray-700 font-medium">
-                                  {itemName}
-                                </span>
-                              ))}
-                            </div>
-                          </div>
+                        ) : (
+                          shopPrices.slice(0, 2).map((shop: any, idx: number) => {
+                            // shop 自体が undefined の場合はスキップ
+                            if (!shop) return null;
+                            return (
+                              <div 
+                                key={idx} 
+                                className={`p-3.5 rounded-xl shadow-sm border transition-all ${
+                                  idx === 0 
+                                    ? 'bg-white border-orange-300 ring-2 ring-orange-500/10' 
+                                    : 'bg-white/60 border-gray-200'
+                                }`}
+                              >
+                                <div className="flex justify-between items-center text-sm mb-2">
+                                  <div className="flex items-center gap-2">
+                                    {idx === 0 ? (
+                                      <span className="bg-orange-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥇 一番おすすめ</span>
+                                    ) : (
+                                      <span className="bg-gray-400 text-white text-xs font-bold px-2 py-0.5 rounded-full">🥈 第2候補</span>
+                                    )}
+                                    <span className="font-bold text-gray-800 text-base">{shop.shopName}</span>
+                                  </div>
+                                </div>
+                                
+                                {shop.matchedItems && Array.isArray(shop.matchedItems) && shop.matchedItems.length > 0 && (
+                                  <div className="text-xs text-gray-500">
+                                    <p className="mb-1 text-gray-500 font-medium">このお店で購入できる材料:</p>
+                                    <div className="flex flex-wrap gap-1">
+                                      {shop.matchedItems.map((itemName: string, itemIdx: number) => (
+                                        <span key={itemIdx} className="bg-gray-100 border border-gray-200 px-2 py-0.5 rounded text-[11px] text-gray-700 font-medium">
+                                          {itemName}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })
                         )}
                       </div>
-                    ))
-                  )}
-                </div>
-              </div>
-            )}
-
-            <div className="mb-6">
-              <h4 className="font-bold text-gray-700 mb-1.5">🍳 作り方手順</h4>
-              {currentModalRecipe.steps ? (
-                <div className="space-y-2">
-                  {currentModalRecipe.steps.map((step) => (
-                    <div key={step.order} className="flex gap-2.5 text-sm p-2 bg-slate-50 rounded border border-slate-100">
-                      <span className="font-bold text-purple-600 shrink-0">{step.order}.</span>
-                      <p className="text-gray-600 leading-relaxed">{step.description}</p>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-gray-600 whitespace-pre-wrap text-sm leading-relaxed bg-gray-50 p-3 rounded-lg border">
-                  {currentModalRecipe.instructions}
-                </p>
-              )}
-            </div>
+                  )}
 
-            <div className="flex gap-3">
-              <button
-                type="button"
-                // ★ 変更: 引数を補正済みの currentModalRecipe に変更
-                onClick={() => handleFetchPurchaseEstimation(currentModalRecipe)}
-                disabled={isFetchingPrices}
-                className="flex-1 flex items-center justify-center gap-1 bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md hover:bg-amber-600 transition-all active:scale-95 disabled:bg-amber-300 disabled:cursor-not-allowed"
-              >
-                {isFetchingPrices ? <Loader2 className="size-5 animate-spin" /> : <ShoppingCart className="size-5" />}
-                {isFetchingPrices ? "価格を取得中..." : "足りない材料を購入"}
-              </button>
-              <button
-                type="button"
-                // ★ 変更: 適応ボタン時にも補正済みの currentModalRecipe を渡します
-                onClick={() => handleFinalAdd(currentModalRecipe)}
-                className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all"
-              >
-                このレシピを適応する
-              </button>
-            </div>
+                  <div className="mb-6">
+                    <h4 className="font-bold text-gray-700 mb-1.5">🍳 作り方手順</h4>
+                    {currentRecipe.steps ? (
+                      <div className="space-y-2">
+                        {currentRecipe.steps.map((step) => (
+                          <div key={step.order} className="flex gap-2.5 text-sm p-2 bg-slate-50 rounded border border-slate-100">
+                            <span className="font-bold text-purple-600 shrink-0">{step.order}.</span>
+                            <p className="text-gray-600 leading-relaxed">{step.description}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-gray-600 whitespace-pre-wrap text-sm leading-relaxed bg-gray-50 p-3 rounded-lg border">
+                        {currentRecipe.instructions}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-3">
+                    <button
+                      type="button"
+                      onClick={() => handleFetchPurchaseEstimation(currentRecipe)}
+                      disabled={isFetchingPrices}
+                      className="flex-1 flex items-center justify-center gap-1 bg-amber-500 text-white font-bold py-3 rounded-xl shadow-md hover:bg-amber-600 transition-all active:scale-95 disabled:bg-amber-300 disabled:cursor-not-allowed"
+                    >
+                      {isFetchingPrices ? <Loader2 className="size-5 animate-spin" /> : <ShoppingCart className="size-5" />}
+                      {isFetchingPrices ? "価格を取得中..." : "足りない材料を購入"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleFinalAdd(currentRecipe)}
+                      className="flex-1 bg-gradient-to-r from-purple-500 to-indigo-500 text-white font-bold py-3 rounded-xl shadow-lg hover:opacity-90 transition-all"
+                    >
+                      このレシピを適応する
+                    </button>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}
