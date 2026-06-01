@@ -1001,9 +1001,18 @@ const handleFinalAdd = async (recipe: Recipe) => {
     }
   };
 
-  const handleCameraCaptureComplete = async () => {
-    setShowCamera(false);
-    await fetchExpenses();
+const handleCameraCaptureComplete = async () => {
+    try {
+      // 💡 家計簿データと同時に、最新の在庫データも裏でまとめて再取得します
+      await Promise.all([
+        fetchExpenses(),
+        fetchInventoryBalances() // 👈 【これを追加！】カメラ登録後の在庫を即座に反映
+      ]);
+    } catch (err) {
+      console.error("カメラ完了後のデータ再取得に失敗しました:", err);
+    } finally {
+      setShowCamera(false);
+    }
   };
 
 
